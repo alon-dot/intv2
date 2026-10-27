@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Activity, BriefcaseBusiness, ChartNoAxesCombined, ClipboardList, Clock3, History, Menu, Users, X } from './icons';
 import type { UserRole } from '../types/database';
+import ThemeToggle from './ThemeToggle';
 
 export type TabId = 'tasks' | 'supervision' | 'time' | 'clients' | 'history' | 'workload' | 'metrics' | 'users';
 
@@ -42,7 +43,10 @@ export default function Sidebar({ role, activeTab, onTabChange }: SidebarProps) 
             </button>
           ))}
         </nav>
-        <div className="mt-8 hidden items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 lg:flex"><Activity size={15} /> Acceso: {role}</div>
+        <div className="mt-8 space-y-3">
+          <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500"><Activity size={15} /> Acceso: {role}</div>
+          <div className="flex items-center justify-between rounded-xl px-3 py-2"><ThemeToggle /></div>
+        </div>
       </aside>
     </>
   );
