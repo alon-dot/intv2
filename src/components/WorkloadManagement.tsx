@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { useFormDraft } from '../hooks/useFormDraft';
+import { logActivity } from '../lib/activityLogs';
 
 type Profile = { id: string; full_name: string; role: string };
 type Client = { id: string; name: string };
@@ -218,6 +219,7 @@ export default function WorkloadManagement() {
       setError(`No se pudo crear la asignación: ${insertError.message}`);
       return;
     }
+    await logActivity(user.id, 'task_assigned', `Asignó la tarea ${taskData.title} a ${names[assigneeId] ?? 'el contador seleccionado'}`);
     clearAssignmentDraft();
     setTitle(''); setDescription(''); setNotes(''); setProjectKey(''); setSelectedSubtaskIds([]);
     setClientId(''); setAssigneeId(''); setPriority('normal'); setHours(''); setDueDate('');
@@ -234,6 +236,7 @@ export default function WorkloadManagement() {
       setError(`No se pudo reasignar el trabajo: ${updateError.message}`);
       return;
     }
+    await logActivity(user?.id, 'task_assigned', `Asignó la tarea ${task.title} a ${names[nextAssigneeId] ?? 'el contador seleccionado'}`);
     setNotice(`Trabajo reasignado a ${names[nextAssigneeId] ?? 'el contador seleccionado'}.`);
     await load();
   }
@@ -272,7 +275,7 @@ export default function WorkloadManagement() {
       <section className="min-w-0 rounded-2xl bg-white p-5 shadow-sm sm:p-7">
         <h2 className="text-xl font-bold text-slate-900">Registro histórico de asignaciones</h2>
         <p className="mt-1 text-sm text-slate-500">Fecha de creación y contador asignado de cada tarea.</p>
-        {loading ? <p className="mt-4 text-sm text-slate-500">Cargando historial…</p> : tasks.length === 0 ? <p className="mt-4 text-sm text-slate-500">Todavía no hay asignaciones registradas.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-2 py-3">Creado por</th><th className="px-2 py-3">Tipo / actividad</th><th className="px-2 py-3">Cliente</th><th className="px-2 py-3">Contador asignado</th><th className="px-2 py-3">Fecha y hora</th><th className="px-2 py-3">Acciones</th></tr></thead><tbody>{tasks.map((task) => <tr key={task.id} className="border-b border-slate-100 align-top"><td className="px-2 py-3">{task.created_by ? names[task.created_by] ?? 'Usuario' : '—'}</td><td className="max-w-64 px-2 py-3"><span className="block truncate font-medium text-slate-800">{task.project_id ? projectNames[task.project_id] ?? task.title : task.title}</span>{task.subtasks?.length ? <span className="text-xs text-slate-500">{task.subtasks.join(', ')}</span> : task.project_subtask_id && <span className="text-xs text-slate-500">{subtaskNames[task.project_subtask_id] ?? ''}</span>}</td><td className="px-2 py-3">{task.client_id ? clientNames[task.client_id] ?? 'Cliente' : '—'}</td><td className="px-2 py-3">{task.assigned_to ? names[task.assigned_to] ?? 'Usuario' : 'Sin asignar'}</td><td className="whitespace-nowrap px-2 py-3">{task.created_at ? formatDateTime(task.created_at) : '—'}</td><td className="px-2 py-3"><div className="flex flex-col gap-2"><button type="button" onClick={() => setDetail({ task, subtaskName: task.subtasks?.join(', ') || (task.project_subtask_id ? subtaskNames[task.project_subtask_id] ?? null : null) })} className="text-left font-medium text-blue-700 hover:underline">Ver detalles</button><select aria-label={`Reasignar ${task.title}`} value={task.assigned_to ?? ''} disabled={saving} onChange={(event) => void reassign(task, event.target.value)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"><option value="" disabled>Reasignar a…</option>{accountants.map((accountant) => <option key={accountant.id} value={accountant.id}>{accountant.full_name}</option>)}</select></div></td></tr>)}</tbody></table></div>}
+        {loading ? <p className="mt-4 text-sm text-slate-500">Cargando historial…</p> : tasks.length === 0 ? <p className="mt-4 text-sm text-slate-500">Todavía no hay asignaciones registradas.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-2 py-3">Creado por</th><th className="px-2 py-3">Tipo / actividad</th><th className="px-2 py-3">Cliente</th><th className="px-2 py-3">Contador asignado</th><th className="px-2 py-3">Fecha y hora</th><th className="px-2 py-3">Acciones</th></tr></thead><tbody>{tasks.map((task) => <tr key={task.id} className="border-b border-slate-100 align-top"><td className="px-2 py-3">{task.created_by ? names[task.created_by] ?? 'Usuario' : '—'}</td><td className="max-w-64 px-2 py-3"><span className="block truncate font-medium text-slate-800">{task.project_id ? projectNames.get(task.project_id) ?? task.title : task.title}</span>{task.subtasks?.length ? <span className="text-xs text-slate-500">{task.subtasks.join(', ')}</span> : task.project_subtask_id && <span className="text-xs text-slate-500">{subtaskNames[task.project_subtask_id] ?? ''}</span>}</td><td className="px-2 py-3">{task.client_id ? clientNames[task.client_id] ?? 'Cliente' : '—'}</td><td className="px-2 py-3">{task.assigned_to ? names[task.assigned_to] ?? 'Usuario' : 'Sin asignar'}</td><td className="whitespace-nowrap px-2 py-3">{task.created_at ? formatDateTime(task.created_at) : '—'}</td><td className="px-2 py-3"><div className="flex flex-col gap-2"><button type="button" onClick={() => setDetail({ task, subtaskName: task.subtasks?.join(', ') || (task.project_subtask_id ? subtaskNames[task.project_subtask_id] ?? null : null) })} className="text-left font-medium text-blue-700 hover:underline">Ver detalles</button><select aria-label={`Reasignar ${task.title}`} value={task.assigned_to ?? ''} disabled={saving} onChange={(event) => void reassign(task, event.target.value)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"><option value="" disabled>Reasignar a…</option>{accountants.map((accountant) => <option key={accountant.id} value={accountant.id}>{accountant.full_name}</option>)}</select></div></td></tr>)}</tbody></table></div>}
       </section>
     </section>
 

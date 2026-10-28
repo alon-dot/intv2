@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Panel, PersonalPendingTasks, TaskRows, type Task, type TaskStatus } from './DashboardShared';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import { logTaskStatusChange } from '../lib/activityLogs';
 
 export default function ContadorDashboard() {
   const { user } = useAuth();
@@ -31,6 +32,7 @@ export default function ContadorDashboard() {
       setError(`No se pudo actualizar la tarea: ${updateError.message}`);
       return;
     }
+    await logTaskStatusChange(user?.id, task.title, task.status, status);
     setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status } : item));
     setPendingRefresh((current) => current + 1);
   }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { useFormDraft } from '../hooks/useFormDraft';
+import { logActivity } from '../lib/activityLogs';
 
 type Client = { id: string; name: string; tax_id: string | null; tax_regime?: string | string[] | null; tax_regimes?: string[] | null; contact_email: string | null; phone: string | null; [key: string]: any };
 type Project = { id: string; client_id: string; name: string };
@@ -191,6 +192,7 @@ export default function ClientHistory() {
       : await supabase.from('clients').insert(clientData);
     setSavingClient(false);
     if (result.error) { setError(`No se pudo guardar el cliente: ${result.error.message}`); return; }
+    if (!editingClient) await logActivity(user?.id, 'client_created', `Creó el cliente: ${clientName.trim()}`);
     clearClientDraft();
     setSelectedId(editingClient?.id ?? '');
     setEditingClient(null);
