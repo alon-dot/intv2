@@ -7,6 +7,7 @@ import TaskList from './TaskList';
 import WorkloadManagement from './WorkloadManagement';
 import ClientHistory from './ClientHistory';
 import UserManagement from './UserManagement';
+import ActivityHistory from './ActivityHistory';
 
 const tabTitles: Record<TabId, string> = {
   users: 'Gestión de usuarios',
@@ -51,6 +52,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           <div className={activeTab === 'time' ? '' : 'hidden'}><TimeTracker /></div>
           {activeTab === 'workload' && isManager && <WorkloadManagement />}
           {activeTab === 'clients' && <ClientHistory />}
+          {activeTab === 'history' && <ActivityHistory />}
           {activeTab === 'users' && userRole === 'ADMIN' && <UserManagement />}
           {activeTab === 'metrics' && <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center"><h2 className="text-lg font-semibold text-slate-800">{tabTitles[activeTab]}</h2><p className="mt-2 text-sm text-slate-500">Esta sección estará disponible próximamente.</p></section>}
         </main>

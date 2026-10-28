@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
+import { logTaskStatusChange } from '../lib/activityLogs';
 
 type TaskStatus = 'pending' | 'in_progress' | 'review' | 'completed';
 type Priority = 'urgent' | 'medium' | 'normal';
@@ -129,7 +130,7 @@ export default function TaskList() {
     if (updateError) {
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: previousStatus } : item));
       setError(`No se pudo actualizar el estado: ${updateError.message}`);
-    }
+    } else await logTaskStatusChange(user?.id, task.title, previousStatus, nextStatus);
     setSavingId(null);
   }
 

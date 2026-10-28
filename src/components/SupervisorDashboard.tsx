@@ -4,6 +4,7 @@ import { DashboardShell, Panel, StatusBadge, type Profile, type Task } from './D
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { useFormDraft } from '../hooks/useFormDraft';
+import { logActivity } from '../lib/activityLogs';
 
 type SupervisorAssignmentDraft = {
   title: string; description: string; assignee: string; assignmentType: 'independent' | 'official';
@@ -159,6 +160,7 @@ export default function SupervisorDashboard() {
       setError(`No se pudo crear la tarea: ${insertError.message}`);
       return;
     }
+    await Promise.all(taskRows.map((task) => logActivity(user.id, 'task_assigned', `Asignó la tarea ${task.title} a ${names[assignee] ?? 'el contador seleccionado'}`)));
     clearAssignmentDraft();
     setTitle('');
     setDescription('');
