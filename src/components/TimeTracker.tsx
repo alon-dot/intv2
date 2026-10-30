@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 
 type Client = { id: string; name: string };
 type Project = { id: string; name: string; client_id: string };
-type Task = { id: string; title: string; project_id: string };
+type Task = { id: string; title: string; project_id: string; client_id?: string };
 type TimeEntry = {
   id: string;
   task_id: string;
@@ -104,17 +104,46 @@ export default function TimeTracker() {
     let active = true;
     async function loadOptions() {
       setLoading(true);
-      const [clientResult, projectResult, taskResult] = await Promise.all([
+      
+      // Consultamos clientes y project_subtasks (que contiene el desglose real)
+      const [clientResult, subtaskResult] = await Promise.all([
         supabase.from('clients').select('id,name').order('name'),
-        supabase.from('projects').select('id,name,client_id').order('name'),
-        supabase.from('tasks').select('id,title,project_id').order('title'),
+        supabase.from('project_subtasks').select('id,project_name,subtask_name').order('project_name'),
       ]);
+
       if (!active) return;
-      const queryError = clientResult.error ?? projectResult.error ?? taskResult.error;
-      if (queryError) setError(`No se pudieron cargar clientes, proyectos o tareas: ${queryError.message}`);
+      const queryError = clientResult.error ?? subtaskResult.error;
+      if (queryError) setError(`No se pudieron cargar los datos: ${queryError.message}`);
+
       setClients((clientResult.data ?? []) as Client[]);
-      setProjects((projectResult.data ?? []) as Project[]);
-      setTasks((taskResult.data ?? []) as Task[]);
+
+      const rawSubtasks = (subtaskResult.data ?? []) as any[];
+
+      // Agrupamos los proyectos únicos por 'project_name'
+      const uniqueProjectsMap = new Map<string, Project>();
+      rawSubtasks.forEach((item) => {
+        if (!uniqueProjectsMap.has(item.project_name)) {
+          uniqueProjectsMap.set(item.project_name, {
+            id: item.id,
+            name: item.project_name,
+            client_id: '', // Abierto para cualquier cliente o ajustable
+          });
+        }
+      });
+      setProjects(Array.from(uniqueProjectsMap.values()));
+
+      // Mapeamos las subtareas reales como tareas disponibles
+      const mappedTasks: Task[] = rawSubtasks.map((item) => {
+        // Encontramos el ID del proyecto virtual correspondiente
+        const matchingProject = uniqueProjectsMap.get(item.project_name);
+        return {
+          id: item.id,
+          title: item.subtask_name,
+          project_id: matchingProject ? matchingProject.id : item.id,
+        };
+      });
+      setTasks(mappedTasks);
+
       setLoading(false);
     }
     void loadOptions();
