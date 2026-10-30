@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Texto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 388.84 277.36">
+  <defs>
+    <style>
+      .cls-1 {
+        font-size: 40px;
+      }
+
+      .cls-1, .cls-2, .cls-3 {
+        fill: #c9a55e;
+      }
+
+      .cls-1, .cls-3 {
+        font-family: Georgia, Georgia;
+      }
+
+      .cls-3 {
+        font-size: 70px;
+      }
+    </style>
+  </defs>
+  <polygon class="cls-2" points="172.39 0 142.68 30 100.69 30 100.69 0 172.39 0"/>
+  <polygon class="cls-2" points="218.14 0 218.14 30 157.44 30 177.62 8.78 185.96 0 218.14 0"/>
+  <polygon class="cls-2" points="175.69 30 175.69 136.17 145.69 136.17 145.69 41.87 147.16 40.38 157.44 30 175.69 30"/>
+  <polygon class="cls-2" points="218.54 44.11 218.54 56.61 188.54 86.61 188.54 44.11 218.54 44.11"/>
+  <polygon class="cls-2" points="188.54 100.76 218.54 70.77 218.54 136.17 188.54 136.17 188.54 100.76"/>
+  <path class="cls-2" d="M310.83,49.08c0,13.56-5.5,25.83-14.38,34.71-8.88,8.89-21.15,14.38-34.7,14.38h-30.36v-28.85h29.79c10.53,0,19.06-8.53,19.06-19.06v-2.36c0-10.52-8.53-19.05-19.06-19.05h-19.19V0h19.76c27.1,0,49.08,21.97,49.08,49.08Z"/>
+  <rect class="cls-2" x="209.5" width="21.9" height="30"/>
+  <text class="cls-3" transform="translate(0 219.38)"><tspan x="0" y="0">Téllez Ponce</tspan></text>
+  <text class="cls-1" transform="translate(95.21 265.24)"><tspan x="0" y="0">&amp; Asociados</tspan></text>
+</svg>

@@ -32,13 +32,13 @@ export default function Sidebar({ role, activeTab, onTabChange }: SidebarProps) 
       </div>
       <aside className={`${mobileOpen ? 'block' : 'hidden'} absolute inset-x-0 top-[57px] z-20 border-b border-slate-200 bg-white p-4 lg:static lg:block lg:min-h-screen lg:w-72 lg:shrink-0 lg:border-b-0 lg:border-r lg:p-6`}>
         {/* Contenedor del logo ajustado para evitar el desbordamiento */}
-        <div className="mb-6 hidden lg:block">
-          <div className="mb-3">
-            <img src="/logo-light.png.png" alt="Téllez Ponce & Asociados" className="block h-35 w-auto object-contain dark:hidden" />
-            <img src="/logo-dark.png.png" alt="Téllez Ponce & Asociados" className="hidden h-35 w-auto object-contain dark:block" />
-          </div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Panel de gestión</p>
-        </div>
+      <div className="mb-6 hidden lg:block">
+      <div className="mb-3 px-2">
+        <img src="/Telles%20Ponce%20Blanco.svg" alt="Téllez Ponce & Asociados" className="block h-35 w-full object-contain dark:hidden" />
+        <img src="/Telles%20Ponce%20Azul.svg" alt="Téllez Ponce & Asociados" className="hidden h-35 w-full object-contain dark:block" />
+      </div>
+      <p className="text-xs font-semibold uppercase tracking-widest text-slate-400">Panel de gestión</p>
+      </div>
         
         <nav aria-label="Navegación principal" className="space-y-1">
           {visibleLinks.map(({ id, label, icon: Icon }) => (
