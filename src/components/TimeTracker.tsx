@@ -3,10 +3,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 
 type Client = { id: string; name: string };
-type Project = { id: string; name: string; client_id: string };
-type Task = { id: string; title: string; project_id: string };
+type Project = { id: string; name: string };
+type Subtask = { id: string; subtask_name: string; project_name: string };
 type TimeEntry = {
   id: string;
+  client_id: string;
   task_id: string;
   start_time: string | null;
   duration_minutes: number;
@@ -52,11 +53,13 @@ export default function TimeTracker() {
   const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
+  
   const [clientId, setClientId] = useState('');
   const [projectId, setProjectId] = useState('');
   const [taskId, setTaskId] = useState('');
+  
   const [manualDate, setManualDate] = useState(localDateInput());
   const [manualHours, setManualHours] = useState('');
   const [manualMinutes, setManualMinutes] = useState('');
@@ -71,14 +74,21 @@ export default function TimeTracker() {
   const [notice, setNotice] = useState<string | null>(null);
   const today = localDateInput();
 
-  const availableProjects = useMemo(
-    () => projects.filter((project) => !clientId || project.client_id === clientId),
-    [projects, clientId],
+  const availableProjects = useMemo(() => {
+    const uniqueMap = new Map();
+    subtasks.forEach(sub => {
+      if (sub.project_name && !uniqueMap.has(sub.project_name)) {
+        uniqueMap.set(sub.project_name, { id: sub.project_name, name: sub.project_name });
+      }
+    });
+    return Array.from(uniqueMap.values());
+  }, [subtasks]);
+
+  const availableSubtasks = useMemo(
+    () => subtasks.filter((sub) => !projectId || sub.project_name === projectId),
+    [subtasks, projectId],
   );
-  const availableTasks = useMemo(
-    () => tasks.filter((task) => !projectId || task.project_id === projectId),
-    [tasks, projectId],
-  );
+  
   const totalMinutesToday = entries.reduce((total, entry) => total + entry.duration_minutes, 0);
 
   const loadEntries = useCallback(async () => {
@@ -86,7 +96,7 @@ export default function TimeTracker() {
     const { start, end } = dayRange(today);
     const { data, error: queryError } = await supabase
       .from('time_entries')
-      .select('id,task_id,start_time,duration_minutes,is_manual,justification')
+      .select('id,client_id,task_id,start_time,duration_minutes,is_manual,justification')
       .eq('user_id', user.id)
       .gte('start_time', start)
       .lt('start_time', end)
@@ -104,17 +114,16 @@ export default function TimeTracker() {
     let active = true;
     async function loadOptions() {
       setLoading(true);
-      const [clientResult, projectResult, taskResult] = await Promise.all([
+      const [clientResult, subtaskResult] = await Promise.all([
         supabase.from('clients').select('id,name').order('name'),
-        supabase.from('projects').select('id,name,client_id').order('name'),
-        supabase.from('tasks').select('id,title,project_id').order('title'),
+        supabase.from('project_subtasks').select('id,subtask_name,project_name').order('subtask_name'),
       ]);
       if (!active) return;
-      const queryError = clientResult.error ?? projectResult.error ?? taskResult.error;
-      if (queryError) setError(`No se pudieron cargar clientes, proyectos o tareas: ${queryError.message}`);
+      const queryError = clientResult.error ?? subtaskResult.error;
+      if (queryError) setError(`No se pudieron cargar los datos: ${queryError?.message}`);
+      
       setClients((clientResult.data ?? []) as Client[]);
-      setProjects((projectResult.data ?? []) as Project[]);
-      setTasks((taskResult.data ?? []) as Task[]);
+      setSubtasks((subtaskResult.data ?? []) as Subtask[]);
       setLoading(false);
     }
     void loadOptions();
@@ -131,7 +140,7 @@ export default function TimeTracker() {
   }, [activeSegmentStarted, timerMode]);
 
   function startTimer() {
-    if (!taskId) {
+    if (!taskId || !clientId) {
       setError('Selecciona un cliente, proyecto y tarea antes de iniciar el cronómetro.');
       return;
     }
@@ -153,7 +162,7 @@ export default function TimeTracker() {
   }
 
   async function stopTimer() {
-    if (!user || !taskId || !startedAt || saving) return;
+    if (!user || !taskId || !clientId || !startedAt || saving) return;
     const finalSeconds = timerMode === 'running' && activeSegmentStarted !== null
       ? (Date.now() - activeSegmentStarted) / 1000
       : elapsedSeconds;
@@ -168,6 +177,7 @@ export default function TimeTracker() {
     setNotice(null);
     const { error: insertError } = await supabase.from('time_entries').insert({
       user_id: user.id,
+      client_id: clientId,
       task_id: taskId,
       start_time: startedAt,
       end_time: new Date().toISOString(),
@@ -194,7 +204,7 @@ export default function TimeTracker() {
 
   async function saveManualEntry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!user || !taskId || saving) return;
+    if (!user || !taskId || !clientId || saving) return;
     setError(null);
     setNotice(null);
     const hours = Number(manualHours || 0);
@@ -214,6 +224,7 @@ export default function TimeTracker() {
     setSaving(true);
     const { error: insertError } = await supabase.from('time_entries').insert({
       user_id: user.id,
+      client_id: clientId,
       task_id: taskId,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
@@ -234,9 +245,8 @@ export default function TimeTracker() {
   }
 
   const selectedTaskLabel = (id: string) => {
-    const task = tasks.find((item) => item.id === id);
-    const project = projects.find((item) => item.id === task?.project_id);
-    return task ? `${task.title}${project ? ` · ${project.name}` : ''}` : 'Tarea';
+    const subtask = subtasks.find((item) => item.id === id);
+    return subtask ? `${subtask.subtask_name} (${subtask.project_name})` : 'Tarea';
   };
 
   return (
@@ -247,6 +257,7 @@ export default function TimeTracker() {
         {notice && <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</p>}
 
         <div className="grid gap-6 lg:grid-cols-2">
+          {/* MODO EN VIVO */}
           <section className="rounded-xl border border-slate-200 p-4 sm:p-5">
             <h3 className="text-lg font-semibold text-slate-900">Modo en vivo</h3>
             <p className="mt-1 text-sm text-slate-500">Inicia, pausa y detén el cronómetro para guardar el tiempo.</p>
@@ -256,17 +267,22 @@ export default function TimeTracker() {
                   <option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
                 </select>
               </label>
+              
               <label className="text-sm font-medium text-slate-700">Proyecto
                 <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setTaskId(''); }} disabled={loading || !clientId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
-                  <option value="">Selecciona un proyecto</option>{availableProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                  <option value="">Selecciona un proyecto</option>
+                  {availableProjects.map((project) => <option key={project.id} value={project.name}>{project.name}</option>)}
                 </select>
               </label>
+
               <label className="text-sm font-medium text-slate-700">Tarea
                 <select value={taskId} onChange={(event) => setTaskId(event.target.value)} disabled={loading || !projectId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
-                  <option value="">Selecciona una tarea</option>{availableTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+                  <option value="">Selecciona una tarea</option>
+                  {availableSubtasks.map((sub) => <option key={sub.id} value={sub.id}>{sub.subtask_name}</option>)}
                 </select>
               </label>
             </div>
+
             <div className="mt-6 flex flex-col items-center rounded-xl bg-slate-50 p-5">
               <p className="font-mono text-4xl font-semibold tabular-nums text-slate-900" aria-live="off">{formatDuration(Math.floor(elapsedSeconds))}</p>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -278,22 +294,33 @@ export default function TimeTracker() {
             </div>
           </section>
 
+          {/* REGISTRO MANUAL */}
           <section className="rounded-xl border border-slate-200 p-4 sm:p-5">
             <h3 className="text-lg font-semibold text-slate-900">Registro manual</h3>
             <p className="mt-1 text-sm text-slate-500">Registra tiempo trabajado fuera del cronómetro.</p>
             <form onSubmit={(event) => void saveManualEntry(event)} className="mt-4 space-y-3">
               <label className="block text-sm font-medium text-slate-700">Cliente
-              <select value={clientId} onChange={(event) => { setClientId(event.target.value); setProjectId(''); setTaskId(''); }} required disabled={timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
+                <select value={clientId} onChange={(event) => { setClientId(event.target.value); setProjectId(''); setTaskId(''); }} required disabled={timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
               </label>
+
               <label className="block text-sm font-medium text-slate-700">Proyecto
-                <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setTaskId(''); }} required disabled={!clientId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"><option value="">Selecciona un proyecto</option>{availableProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select>
+                <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setTaskId(''); }} required disabled={!clientId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
+                  <option value="">Selecciona un proyecto</option>
+                  {availableProjects.map((project) => <option key={project.id} value={project.name}>{project.name}</option>)}
+                </select>
               </label>
+
               <label className="block text-sm font-medium text-slate-700">Tarea
-                <select value={taskId} onChange={(event) => setTaskId(event.target.value)} required disabled={!projectId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"><option value="">Selecciona una tarea</option>{availableTasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}</select>
+                <select value={taskId} onChange={(event) => setTaskId(event.target.value)} required disabled={!projectId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
+                  <option value="">Selecciona una tarea</option>
+                  {availableSubtasks.map((sub) => <option key={sub.id} value={sub.id}>{sub.subtask_name}</option>)}
+                </select>
               </label>
+
               <label className="block text-sm font-medium text-slate-700">Fecha
                 <input type="date" value={manualDate} max={today} onChange={(event) => setManualDate(event.target.value)} required className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" />
               </label>
+              
               <div className="grid grid-cols-2 gap-3">
                 <label className="text-sm font-medium text-slate-700">Horas
                   <input type="number" min="0" step="1" value={manualHours} onChange={(event) => setManualHours(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" placeholder="0" />
@@ -302,15 +329,18 @@ export default function TimeTracker() {
                   <input type="number" min="0" max="59" step="1" value={manualMinutes} onChange={(event) => setManualMinutes(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" placeholder="0" />
                 </label>
               </div>
+
               <label className="block text-sm font-medium text-slate-700">Justificación
                 <textarea value={justification} onChange={(event) => setJustification(event.target.value)} required maxLength={1000} rows={3} placeholder="Ej. Reunión presencial con el cliente en cafetería…" className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" />
               </label>
+
               <button type="submit" disabled={saving || loading} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">{saving ? 'Guardando…' : 'Guardar registro manual'}</button>
             </form>
           </section>
         </div>
       </section>
 
+      {/* RESUMEN DEL DÍA */}
       <section className="rounded-2xl bg-white p-5 shadow-sm sm:p-7">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div><p className="text-sm font-semibold uppercase tracking-wider text-slate-400">Resumen del día</p><h2 className="mt-1 text-xl font-bold text-slate-900">Bloques registrados hoy</h2></div>

@@ -7,7 +7,7 @@ import { logActivity } from '../lib/activityLogs';
 type Client = { id: string; name: string; tax_id: string | null; tax_regime?: string | string[] | null; tax_regimes?: string[] | null; contact_email: string | null; phone: string | null; [key: string]: any };
 type Project = { id: string; client_id: string; name: string };
 type Task = { id: string; title: string; status: string; project_id: string; assigned_to: string | null; created_at: string; due_date: string | null };
-type TimeEntry = { id: string; task_id: string; user_id: string; start_time: string | null; created_at: string; duration_minutes: number; is_manual: boolean; justification: string | null };
+type TimeEntry = { id: string; client_id?: string; task_id: string; user_id: string; start_time: string | null; created_at: string; duration_minutes: number; is_manual: boolean; justification: string | null };
 type TimelineEvent = { id: string; date: string | null; type: 'task' | 'time'; task: Task; entry?: TimeEntry; actorName: string };
 type ClientDraft = { clientName: string; taxId: string; taxRegime: string; contactEmail: string; phone: string; clientFields: Record<string, string>; editingClientId: string | null; showClientForm: boolean };
 
@@ -206,24 +206,33 @@ export default function ClientHistory() {
     async function loadHistory() {
       if (!selectedId) { setTasks([]); setEntries([]); setLoadingHistory(false); return; }
       setLoadingHistory(true); setError(null);
+      
       const projectIds = projects.filter((project) => project.client_id === selectedId).map((project) => project.id);
-      if (projectIds.length === 0) { setTasks([]); setEntries([]); setNames({}); setLoadingHistory(false); return; }
-      const { data: taskData, error: taskError } = await supabase.from('tasks')
-        .select('id,title,status,project_id,assigned_to,created_at,due_date')
-        .in('project_id', projectIds).order('created_at', { ascending: false });
-      if (!active) return;
-      if (taskError) { setError(`No se pudieron cargar las tareas del cliente: ${taskError.message}`); setTasks([]); setEntries([]); setLoadingHistory(false); return; }
-      const taskRows = (taskData ?? []) as Task[];
+      
+      // Cargamos tareas si existen proyectos
+      let taskRows: Task[] = [];
+      if (projectIds.length > 0) {
+        const { data: taskData, error: taskError } = await supabase.from('tasks')
+          .select('id,title,status,project_id,assigned_to,created_at,due_date')
+          .in('project_id', projectIds).order('created_at', { ascending: false });
+        if (!active) return;
+        if (taskError) { setError(`No se pudieron cargar las tareas del cliente: ${taskError.message}`); }
+        taskRows = (taskData ?? []) as Task[];
+      }
       setTasks(taskRows);
-      const taskIds = taskRows.map((task) => task.id);
-      if (!taskIds.length) { setEntries([]); setNames({}); setLoadingHistory(false); return; }
+
+      // CAMBIO CLAVE: Consultamos los registros de tiempo directamente filtrando por client_id
       const { data: entryData, error: entryError } = await supabase.from('time_entries')
-        .select('id,task_id,user_id,start_time,created_at,duration_minutes,is_manual,justification')
-        .in('task_id', taskIds).order('start_time', { ascending: false, nullsFirst: false });
+        .select('id,client_id,task_id,user_id,start_time,created_at,duration_minutes,is_manual,justification')
+        .eq('client_id', selectedId)
+        .order('start_time', { ascending: false, nullsFirst: false });
+
       if (!active) return;
-      if (entryError) setError(`No se pudieron cargar los registros de tiempo: ${entryError.message}`);
+      if (entryError) setError((current) => current ?? `No se pudieron cargar los registros de tiempo: ${entryError.message}`);
+      
       const entryRows = (entryData ?? []) as TimeEntry[];
       setEntries(entryRows);
+
       const actorIds = [...new Set([...taskRows.map((task) => task.assigned_to), ...entryRows.map((entry) => entry.user_id)].filter((id): id is string => Boolean(id)))];
       if (actorIds.length) {
         const { data: profileData, error: profileError } = await supabase.from('profiles').select('id,full_name').in('id', actorIds);
@@ -231,6 +240,7 @@ export default function ClientHistory() {
         if (profileError) setError((current) => current ?? `No se pudieron cargar los nombres del equipo: ${profileError.message}`);
         setNames(Object.fromEntries((profileData ?? []).map((profile) => [profile.id, profile.full_name])));
       } else setNames({});
+      
       setLoadingHistory(false);
     }
     void loadHistory();
@@ -242,16 +252,20 @@ export default function ClientHistory() {
     if (!normalized) return clients;
     return clients.filter((client) => client.name.toLocaleLowerCase('es-MX').includes(normalized) || (client.tax_id ?? '').toLocaleLowerCase('es-MX').includes(normalized));
   }, [clients, search]);
+  
   const selectedClient = clients.find((client) => client.id === selectedId) ?? null;
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const completedTasks = tasks.filter((task) => task.status.toLowerCase() === 'completed').length;
   const pendingTasks = tasks.length - completedTasks;
   const totalMinutes = entries.reduce((sum, entry) => sum + (Number(entry.duration_minutes) || 0), 0);
+  
   const timeline = useMemo<TimelineEvent[]>(() => [
     ...tasks.map((task): TimelineEvent => ({ id: `task-${task.id}`, date: task.created_at, type: 'task', task, actorName: task.assigned_to ? names[task.assigned_to] ?? 'Contador' : 'Sin asignar' })),
     ...entries.flatMap((entry) => {
       const task = taskById.get(entry.task_id);
-      return task ? [{ id: `entry-${entry.id}`, date: entry.start_time ?? entry.created_at, type: 'time' as const, task, entry, actorName: names[entry.user_id] ?? 'Contador' }] : [];
+      // Si la tarea existe en la lista local o queremos mostrar el registro vinculado por cliente:
+      const fallbackTask = task ?? { id: entry.task_id, title: 'Actividad registrada', status: 'completed', project_id: '', assigned_to: null, created_at: entry.start_time ?? entry.created_at, due_date: null };
+      return [{ id: `entry-${entry.id}`, date: entry.start_time ?? entry.created_at, type: 'time' as const, task: fallbackTask, entry, actorName: names[entry.user_id] ?? 'Contador' }];
     }),
   ].sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()), [entries, names, taskById, tasks]);
 
