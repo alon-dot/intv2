@@ -8,6 +8,8 @@ import WorkloadManagement from './WorkloadManagement';
 import ClientHistory from './ClientHistory';
 import UserManagement from './UserManagement';
 import ActivityHistory from './ActivityHistory';
+import AdminDashboard from './AdminDashboard'; // Supervisión de tareas original
+import AdminMetrics from './AdminMetrics'; // Nuevo módulo exclusivo de métricas y gráficas
 
 const tabTitles: Record<TabId, string> = {
   users: 'Gestión de usuarios',
@@ -43,18 +45,28 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       {userRole && <Sidebar role={userRole} activeTab={activeTab} onTabChange={setActiveTab} />}
       <div className="min-w-0 flex-1">
         <header className="hidden items-center justify-between border-b border-slate-200 bg-white px-8 py-4 lg:flex">
-          <div><p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Panel de gestión</p><h1 className="mt-1 text-xl font-semibold text-slate-900">{tabTitles[activeTab]}</h1></div>
-          <div className="flex items-center gap-4"><span className="text-sm text-slate-600">{profile?.full_name || user?.email}</span><button type="button" onClick={() => void signOut()} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cerrar sesión</button></div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Panel de gestión</p>
+            <h1 className="mt-1 text-xl font-semibold text-slate-900">{tabTitles[activeTab]}</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-slate-600">{profile?.full_name || user?.email}</span>
+            <button type="button" onClick={() => void signOut()} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              Cerrar sesión
+            </button>
+          </div>
         </header>
         <main className="p-4 sm:p-6 lg:p-8">
           {isPersonalTasks && <><TaskList />{children}</>}
-          {isSupervision && children}
+          {isSupervision && (children || <AdminDashboard />)}
           <div className={activeTab === 'time' ? '' : 'hidden'}><TimeTracker /></div>
           {activeTab === 'workload' && isManager && <WorkloadManagement />}
           {activeTab === 'clients' && <ClientHistory />}
           {activeTab === 'history' && <ActivityHistory />}
           {activeTab === 'users' && userRole === 'ADMIN' && <UserManagement />}
-          {activeTab === 'metrics' && <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center"><h2 className="text-lg font-semibold text-slate-800">{tabTitles[activeTab]}</h2><p className="mt-2 text-sm text-slate-500">Esta sección estará disponible próximamente.</p></section>}
+          
+          {/* Mapeo limpio a la nueva vista de Rendimiento y Métricas */}
+          {activeTab === 'metrics' && isManager && <AdminMetrics />}
         </main>
       </div>
     </div>

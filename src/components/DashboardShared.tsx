@@ -5,22 +5,31 @@ import type { Database } from '../types/database';
 
 export type Task = Database['public']['Tables']['tasks']['Row'];
 export type Profile = Database['public']['Tables']['profiles']['Row'];
-export type TaskStatus = 'pending' | 'in_progress' | 'completed';
+export type TaskStatus = 'pending' | 'in_progress' | 'in_review' | 'completed' | 'review';
 
 export const taskStatusLabel: Record<string, string> = {
   pending: 'Pendiente',
   in_progress: 'En Proceso',
+  in_review: 'En revisión',
+  review: 'En revisión',
   completed: 'Completada',
 };
 
 const statusClass: Record<string, string> = {
   pending: 'bg-amber-100 text-amber-800',
   in_progress: 'bg-blue-100 text-blue-800',
+  in_review: 'bg-purple-100 text-purple-800',
+  review: 'bg-purple-100 text-purple-800',
   completed: 'bg-emerald-100 text-emerald-800',
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass[status] ?? 'bg-slate-100 text-slate-700'}`}>{taskStatusLabel[status] ?? status}</span>;
+  const st = String(status).toLowerCase();
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass[st] ?? 'bg-slate-100 text-slate-700'}`}>
+      {taskStatusLabel[st] ?? status}
+    </span>
+  );
 }
 
 export function DashboardShell({ children }: { title: string; children: ReactNode }) {
@@ -69,7 +78,10 @@ export function TaskRows({ tasks, assignees, onStatusChange }: { tasks: Task[]; 
           {task.assigned_to && assignees?.[task.assigned_to] && <p className="mt-1 text-xs text-slate-500">Asignada a: {assignees[task.assigned_to]}</p>}
         </div>
         {onStatusChange ? <select aria-label={`Estado de ${task.title}`} value={task.status} onChange={(event) => onStatusChange(task, event.target.value as TaskStatus)} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 sm:w-auto">
-          <option value="pending">Pendiente</option><option value="in_progress">En Proceso</option><option value="completed">Completada</option>
+          <option value="pending">Pendiente</option>
+          <option value="in_progress">En Proceso</option>
+          <option value="in_review">En revisión</option>
+          <option value="completed">Completada</option>
         </select> : <StatusBadge status={task.status} />}
       </li>)}
     </ul>
