@@ -4,11 +4,24 @@ import { supabase } from '../lib/supabaseClient';
 
 type Client = { id: string; name: string };
 
-type Project = { id: string; name: string };
-type Subtask = { id: string; subtask_name: string; project_name: string };
+type Project = { 
+  id: string; 
+  name: string; 
+  client_id: string; 
+};
 
-type Project = { id: string; name: string; client_id: string };
-type Task = { id: string; title: string; project_id: string; client_id?: string };
+type Subtask = { 
+  id: string; 
+  subtask_name: string; 
+  project_name: string; 
+};
+
+type Task = { 
+  id: string; 
+  title: string; 
+  project_id: string; 
+  client_id?: string; 
+};
 
 type TimeEntry = {
   id: string;
@@ -19,6 +32,7 @@ type TimeEntry = {
   is_manual: boolean;
   justification: string | null;
 };
+
 type TimerMode = 'idle' | 'running' | 'paused';
 
 function localDateInput(date = new Date()) {
@@ -59,6 +73,7 @@ export default function TimeTracker() {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [subtasks, setSubtasks] = useState<Subtask[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   
   const [clientId, setClientId] = useState('');
@@ -122,29 +137,21 @@ export default function TimeTracker() {
 
       const [clientResult, subtaskResult] = await Promise.all([
         supabase.from('clients').select('id,name').order('name'),
-        supabase.from('project_subtasks').select('id,subtask_name,project_name').order('subtask_name'),
-
-      
-      // Consultamos clientes y project_subtasks (que contiene el desglose real)
-      const [clientResult, subtaskResult] = await Promise.all([
-        supabase.from('clients').select('id,name').order('name'),
         supabase.from('project_subtasks').select('id,project_name,subtask_name').order('project_name'),
-
       ]);
 
       if (!active) return;
       const queryError = clientResult.error ?? subtaskResult.error;
 
-      if (queryError) setError(`No se pudieron cargar los datos: ${queryError?.message}`);
+      if (queryError) {
+        setError(`No se pudieron cargar los datos: ${queryError.message}`);
+        setLoading(false);
+        return;
+      }
       
       setClients((clientResult.data ?? []) as Client[]);
-      setSubtasks((subtaskResult.data ?? []) as Subtask[]);
-
-      if (queryError) setError(`No se pudieron cargar los datos: ${queryError.message}`);
-
-      setClients((clientResult.data ?? []) as Client[]);
-
       const rawSubtasks = (subtaskResult.data ?? []) as any[];
+      setSubtasks(rawSubtasks as Subtask[]);
 
       // Agrupamos los proyectos únicos por 'project_name'
       const uniqueProjectsMap = new Map<string, Project>();
@@ -153,7 +160,7 @@ export default function TimeTracker() {
           uniqueProjectsMap.set(item.project_name, {
             id: item.id,
             name: item.project_name,
-            client_id: '', // Abierto para cualquier cliente o ajustable
+            client_id: '',
           });
         }
       });
@@ -161,7 +168,6 @@ export default function TimeTracker() {
 
       // Mapeamos las subtareas reales como tareas disponibles
       const mappedTasks: Task[] = rawSubtasks.map((item) => {
-        // Encontramos el ID del proyecto virtual correspondiente
         const matchingProject = uniqueProjectsMap.get(item.project_name);
         return {
           id: item.id,
@@ -170,7 +176,6 @@ export default function TimeTracker() {
         };
       });
       setTasks(mappedTasks);
-
 
       setLoading(false);
     }
