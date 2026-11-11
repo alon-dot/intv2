@@ -6,7 +6,7 @@ import ThemeToggle from './ThemeToggle';
 export type TabId = 'tasks' | 'supervision' | 'time' | 'clients' | 'history' | 'workload' | 'metrics' | 'users';
 
 const links: { id: TabId; label: string; icon: typeof ClipboardList; managersOnly?: boolean; accountantOnly?: boolean; adminOnly?: boolean }[] = [
-  { id: 'tasks', label: 'Mis Tareas (Semáforo)', icon: ClipboardList, accountantOnly: true },
+  { id: 'tasks', label: 'Mis Tareas', icon: ClipboardList, accountantOnly: true },
   { id: 'supervision', label: 'Supervisión de tareas', icon: ClipboardList, managersOnly: true },
   { id: 'time', label: 'Time Tracker', icon: Clock3 },
   { id: 'clients', label: 'Clientes', icon: BriefcaseBusiness },

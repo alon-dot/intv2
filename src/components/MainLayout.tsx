@@ -13,7 +13,7 @@ import AdminMetrics from './AdminMetrics'; // Nuevo módulo exclusivo de métric
 
 const tabTitles: Record<TabId, string> = {
   users: 'Gestión de usuarios',
-  tasks: 'Mis Tareas (Semáforo)',
+  tasks: 'Mis Tareas',
   supervision: 'Supervisión de tareas',
   time: 'Time Tracker',
   clients: 'Clientes',
@@ -36,7 +36,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const { role, profile, user, signOut } = useAuth();
   const userRole = normalizeRole(role);
   const isManager = userRole === 'ADMIN' || userRole === 'SUPERVISOR';
-  const [activeTab, setActiveTab] = useState<TabId>(() => isManager ? 'workload' : 'tasks');
+  const [activeTab, setActiveTab] = useState<TabId>(() => isManager ? 'supervision' : 'tasks');
   const isPersonalTasks = activeTab === 'tasks' && userRole === 'ACCOUNTANT';
   const isSupervision = activeTab === 'supervision' && isManager;
 

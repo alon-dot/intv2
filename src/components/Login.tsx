@@ -143,9 +143,8 @@ export default function Login() {
             {/* Fila inferior: Forgot password y Botón */}
             <div className="flex items-center justify-between pt-2">
               <a href="#forgot" onClick={(e) => e.preventDefault()} className="text-sm font-medium text-[#0F1E36] dark:text-[#C5A059] hover:underline">
-                Forgot your password?
+                ¿Olvidaste tu contraseña? 
               </a>
-
               <button
                 type="submit"
                 disabled={submitting}
@@ -154,6 +153,10 @@ export default function Login() {
                 {submitting ? 'Ingresando…' : 'Login'}
               </button>
             </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 text-left mt-2">
+                Contacta al administrador para restablecerla.
+            </p>
+
           </form>
         </section>
 
