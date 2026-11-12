@@ -5,6 +5,9 @@ import { supabase } from '../lib/supabaseClient';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
 type StatusFilterMode = 'all' | 'completed' | 'in_progress' | 'in_review' | 'pending';
 
+// Configurado en 1 solo para pruebas (cámbialo a 10 o 15 en producción)
+const ITEMS_PER_PAGE = 5;
+
 export default function AdminDashboard() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -15,6 +18,9 @@ export default function AdminDashboard() {
   const [statusFilter, setStatusFilter] = useState<StatusFilterMode>('all');
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+
+  // Estado de paginación
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const load = useCallback(async () => {
     const [profileResult, taskResult] = await Promise.all([
@@ -30,7 +36,7 @@ export default function AdminDashboard() {
 
   const names = useMemo(() => Object.fromEntries(profiles.map((profile) => [profile.id, profile.full_name])), [profiles]);
 
-  // Filtrado dinámico de tareas por fecha y estatus (incluyendo "en_review" / "review")
+  // Filtrado dinámico de tareas por fecha y estatus
   const filteredTasks = useMemo(() => {
     const now = new Date();
 
@@ -68,11 +74,24 @@ export default function AdminDashboard() {
     });
   }, [tasks, filterMode, statusFilter, startDate, endDate]);
 
+  // Reiniciar a la página 1 cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMode, statusFilter, startDate, endDate]);
+
+  // Cálculos de paginación
+  const totalPages = Math.ceil(filteredTasks.length / ITEMS_PER_PAGE);
+  
+  const paginatedTasks = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredTasks.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredTasks, currentPage]);
+
   return (
     <DashboardShell title="Supervisión de tareas">
       {error && <p role="alert" className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">No se pudieron cargar todos los datos: {error}</p>}
 
-      {/* Barra de Filtros Interactivos (Fechas y Estatus con "En revisión") */}
+      {/* Barra de Filtros Interactivos */}
       <div className="mb-6 space-y-4 rounded-2xl bg-white p-4 shadow-sm border border-slate-200">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -95,7 +114,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Filtro secundario por Estatus con el botón de "En revisión" */}
+        {/* Filtro secundario por Estatus */}
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-xs">
           <span className="font-semibold text-slate-500 mr-2">Estatus:</span>
           <button type="button" onClick={() => setStatusFilter('all')} className={`rounded-md px-2.5 py-1 font-medium transition ${statusFilter === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Todas</button>
@@ -106,25 +125,70 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Listado de Supervisión con los datos filtrados */}
+      {/* Listado de Supervisión con Paginación */}
       <Panel title={`Supervisión de tareas (${filteredTasks.length})`}>
         {filteredTasks.length === 0 ? (
           <p className="text-sm text-slate-500 py-4 text-center">No hay tareas que coincidan con los filtros seleccionados.</p>
         ) : (
-          <ul className="divide-y divide-slate-100">
-            {filteredTasks.map((task) => (
-              <li key={task.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-semibold text-slate-900">{task.title}</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Asignada a: {task.assigned_to ? names[task.assigned_to] ?? 'Usuario' : 'Sin asignar'}
-                    {task.description ? ` · ${task.description}` : ''}
-                  </p>
+          <>
+            <ul className="divide-y divide-slate-100">
+              {paginatedTasks.map((task) => (
+                <li key={task.id} className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">{task.title}</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Asignada a: {task.assigned_to ? names[task.assigned_to] ?? 'Usuario' : 'Sin asignar'}
+                      {task.description ? ` · ${task.description}` : ''}
+                    </p>
+                  </div>
+                  <StatusBadge status={task.status} />
+                </li>
+              ))}
+            </ul>
+
+            {/* Controles del Paginador */}
+            {totalPages > 1 && (
+              <div className="mt-5 flex flex-col items-center justify-between gap-3 border-t border-slate-100 pt-4 sm:flex-row">
+                <p className="text-xs text-slate-500">
+                </p>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Anterior
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => setCurrentPage(page)}
+                      className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                        currentPage === page
+                          ? 'bg-blue-600 text-white'
+                          : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Siguiente
+                  </button>
                 </div>
-                <StatusBadge status={task.status} />
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          </>
         )}
       </Panel>
     </DashboardShell>

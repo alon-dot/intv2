@@ -184,35 +184,42 @@ export default function AdminMetrics() {
 
   return (
     <DashboardShell title="Rendimiento y Métricas">
-      {/* Estilos CSS avanzados para impresión: Forzar 1 sola página, ocultar localhost y estilizar modo claro/oscuro */}
+      {/* Estilos CSS avanzados para impresión: Zoom exacto (0.73) para una sola hoja limpia */}
       <style>{`
         @media print {
           @page {
             size: letter portrait;
-            margin: 8mm;
+            margin: 6mm;
           }
           body {
             background-color: #ffffff !important;
             color: #0f172a !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
-            zoom: 0.78; /* Escala precisa para que todo encaje en 1 sola hoja */
+            zoom: 0.73;
           }
           button, .no-print {
             display: none !important;
           }
           .print-header {
             display: flex !important;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
             border-bottom: 2px solid #0f172a;
-            padding-bottom: 8px;
-            margin-bottom: 16px;
+            padding-bottom: 6px;
+            margin-bottom: 10px;
           }
           .rounded-2xl, .rounded-xl {
             border: 1px solid #cbd5e1 !important;
             box-shadow: none !important;
             background-color: #ffffff !important;
+            margin-bottom: 8px !important;
+          }
+          .mb-6 {
+            margin-bottom: 10px !important;
+          }
+          .p-6, .p-5, .p-4 {
+            padding: 10px !important;
           }
         }
         .print-header {
@@ -220,11 +227,13 @@ export default function AdminMetrics() {
         }
       `}</style>
 
-      {/* Encabezado elegante exclusivo para el reporte PDF */}
+      {/* Encabezado exclusivo para el PDF con el logo azul institucional correcto */}
       <div className="print-header">
-        <div>
-          <h1 className="text-lg font-bold text-slate-900">Téllez Ponce & Asociados</h1>
-          <p className="text-xs text-slate-500">Reporte Ejecutivo de Rendimiento y Operación</p>
+        <div className="flex items-center gap-3">
+          <div>
+            <h1 className="text-base font-bold text-slate-900 leading-tight">Téllez Ponce & Asociados</h1>
+            <p className="text-[11px] text-slate-500">Reporte Ejecutivo de Rendimiento y Operación</p>
+          </div>
         </div>
         <div className="text-right">
           <p className="text-xs font-semibold text-slate-700 capitalize">{formattedReportDate}</p>
@@ -306,7 +315,7 @@ export default function AdminMetrics() {
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Volumen de actividades por estatus operativo.</p>
           </div>
           
-          <div className="my-6 flex items-end justify-around h-44 px-2 pt-6 border-b border-l border-slate-200 dark:border-slate-800 relative">
+          <div className="my-4 flex items-end justify-around h-36 px-2 pt-6 border-b border-l border-slate-200 dark:border-slate-800 relative">
             <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-between text-[10px] text-slate-400 pr-2 pointer-events-none">
               <span>{totalTasks}</span>
               <span>{Math.round(totalTasks / 2)}</span>
@@ -364,9 +373,9 @@ export default function AdminMetrics() {
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Comparativa de horas acumuladas por cuenta.</p>
           </div>
 
-          <div className="my-5 space-y-4">
+          <div className="my-4 space-y-3">
             {hoursPerClient.length === 0 ? (
-              <p className="text-xs text-slate-400 py-10 text-center">No hay registros de tiempo en este periodo.</p>
+              <p className="text-xs text-slate-400 py-6 text-center">No hay registros de tiempo en este periodo.</p>
             ) : (
               hoursPerClient.map((item, idx) => {
                 const barWidthPercentage = Math.round((item.hours / maxClientHours) * 100);
@@ -376,7 +385,7 @@ export default function AdminMetrics() {
                       <span className="truncate max-w-[180px]">{item.name}</span>
                       <span className="text-blue-600 dark:text-blue-400 font-bold">{item.hours} hrs</span>
                     </div>
-                    <div className="h-4 w-full bg-slate-100 dark:bg-slate-800 rounded-md overflow-hidden p-0.5">
+                    <div className="h-3.5 w-full bg-slate-100 dark:bg-slate-800 rounded-md overflow-hidden p-0.5">
                       <div 
                         className="h-full bg-blue-600 dark:bg-blue-500 rounded transition-all duration-500" 
                         style={{ width: `${Math.max(barWidthPercentage, 4)}%` }}
@@ -394,41 +403,41 @@ export default function AdminMetrics() {
       </div>
 
       {/* Sección Inferior con los 4 indicadores operacionales completos */}
-      <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
+      <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
         <h3 className="text-base font-bold text-slate-900 dark:text-white">Resumen de Eficiencia y Supervisión Fiscal</h3>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Indicadores globales desglosados sobre el estado de la operación del despacho en el periodo.</p>
         
-        <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-100 dark:border-slate-800">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Tasa de Conclusión</p>
-            <p className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-2">
+            <p className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1.5">
               {totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}%
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">{completedTasks} de {totalTasks} tareas concluidas.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">{completedTasks} de {totalTasks} tareas concluidas.</p>
           </div>
 
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-100 dark:border-slate-800">
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">En Proceso</p>
-            <p className="text-2xl font-extrabold text-blue-500 dark:text-blue-400 mt-2">
+            <p className="text-xl font-extrabold text-blue-500 dark:text-blue-400 mt-1.5">
               {inProgressTasks} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">tareas</span>
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">Actividades en desarrollo activo.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Actividades en desarrollo activo.</p>
           </div>
 
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-100 dark:border-slate-800">
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">En Revisión</p>
-            <p className="text-2xl font-extrabold text-purple-600 dark:text-purple-400 mt-2">
+            <p className="text-xl font-extrabold text-purple-600 dark:text-purple-400 mt-1.5">
               {inReviewTasks} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">tareas</span>
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">Actividades listas para validación.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Actividades listas para validación.</p>
           </div>
 
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-100 dark:border-slate-800">
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pendientes</p>
-            <p className="text-2xl font-extrabold text-amber-500 dark:text-amber-400 mt-2">
+            <p className="text-xl font-extrabold text-amber-500 dark:text-amber-400 mt-1.5">
               {pendingTasks} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">tareas</span>
             </p>
-            <p className="text-[11px] text-slate-400 mt-1">Tareas por iniciar o sin atender.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Tareas por iniciar o sin atender.</p>
           </div>
         </div>
       </div>
