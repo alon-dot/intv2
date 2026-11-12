@@ -37,7 +37,7 @@ export function DashboardShell({ children }: { title: string; children: ReactNod
 }
 
 export function Panel({ title, children, className = '' }: { title: string; children: ReactNode; className?: string }) {
-  return <section className={`rounded-2xl bg-white p-6 shadow-sm ${className}`}><h2 className="mb-4 text-lg font-bold text-slate-900">{title}</h2>{children}</section>;
+  return <section className={`mt-6 rounded-2xl bg-white p-6 shadow-sm ${className}`}><h2 className="mb-4 text-lg font-bold text-slate-900">{title}</h2>{children}</section>;
 }
 
 export function PersonalPendingTasks({ refreshKey = 0 }: { refreshKey?: number }) {

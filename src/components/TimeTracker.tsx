@@ -4,23 +4,14 @@ import { supabase } from '../lib/supabaseClient';
 
 type Client = { id: string; name: string };
 
-type Project = { 
-  id: string; 
-  name: string; 
-  client_id: string; 
-};
-
-type Subtask = { 
-  id: string; 
-  subtask_name: string; 
-  project_name: string; 
-};
-
-type Task = { 
+type TaskItem = { 
   id: string; 
   title: string; 
-  project_id: string; 
-  client_id?: string; 
+  project_id: string | null; 
+  client_id: string | null; 
+  assigned_to?: string | null;
+  activity?: string | null;
+  subactivity?: string | null;
 };
 
 type TimeEntry = {
@@ -71,43 +62,63 @@ function dateLabel(value: string | null) {
 export default function TimeTracker() {
   const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   
-  const [clientId, setClientId] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [taskId, setTaskId] = useState('');
+  // Estados inicializados con persistencia en localStorage para evitar pérdida al cambiar de pestaña
+  const [clientId, setClientId] = useState(() => localStorage.getItem('timer_client_id') || '');
+  const [taskId, setTaskId] = useState(() => localStorage.getItem('timer_task_id') || '');
   
   const [manualDate, setManualDate] = useState(localDateInput());
   const [manualHours, setManualHours] = useState('');
   const [manualMinutes, setManualMinutes] = useState('');
   const [justification, setJustification] = useState('');
-  const [timerMode, setTimerMode] = useState<TimerMode>('idle');
-  const [startedAt, setStartedAt] = useState<string | null>(null);
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [activeSegmentStarted, setActiveSegmentStarted] = useState<number | null>(null);
+
+  const [timerMode, setTimerMode] = useState<TimerMode>(() => {
+    return (localStorage.getItem('timer_mode') as TimerMode) || 'idle';
+  });
+  const [startedAt, setStartedAt] = useState(() => localStorage.getItem('timer_started_at') || null);
+  
+  const [activeSegmentStarted, setActiveSegmentStarted] = useState<number | null>(() => {
+    const saved = localStorage.getItem('timer_active_segment');
+    return saved ? Number(saved) : null;
+  });
+
+  const [elapsedSeconds, setElapsedSeconds] = useState(() => {
+    const savedStarted = localStorage.getItem('timer_active_segment');
+    const savedMode = localStorage.getItem('timer_mode');
+    const savedElapsed = localStorage.getItem('timer_elapsed');
+    if (savedStarted && savedMode === 'running') {
+      return (Date.now() - Number(savedStarted)) / 1000;
+    }
+    return savedElapsed ? Number(savedElapsed) : 0;
+  });
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const today = localDateInput();
 
-  const availableProjects = useMemo(() => {
-    const uniqueMap = new Map();
-    subtasks.forEach(sub => {
-      if (sub.project_name && !uniqueMap.has(sub.project_name)) {
-        uniqueMap.set(sub.project_name, { id: sub.project_name, name: sub.project_name });
-      }
-    });
-    return Array.from(uniqueMap.values());
-  }, [subtasks]);
+  // Sincronizar estado del cronómetro con localStorage automáticamente
+  useEffect(() => {
+    localStorage.setItem('timer_mode', timerMode);
+    localStorage.setItem('timer_client_id', clientId);
+    localStorage.setItem('timer_task_id', taskId);
+    if (startedAt) localStorage.setItem('timer_started_at', startedAt);
+    else localStorage.removeItem('timer_started_at');
 
-  const availableSubtasks = useMemo(
-    () => subtasks.filter((sub) => !projectId || sub.project_name === projectId),
-    [subtasks, projectId],
-  );
+    if (activeSegmentStarted) localStorage.setItem('timer_active_segment', String(activeSegmentStarted));
+    else localStorage.removeItem('timer_active_segment');
+
+    localStorage.setItem('timer_elapsed', String(elapsedSeconds));
+  }, [timerMode, clientId, taskId, startedAt, activeSegmentStarted, elapsedSeconds]);
+
+  // Filtrar tareas según el cliente seleccionado
+  const availableTasks = useMemo(() => {
+    if (!clientId) return tasks;
+    return tasks.filter((t) => t.client_id === clientId);
+  }, [tasks, clientId]);
   
   const totalMinutesToday = entries.reduce((total, entry) => total + entry.duration_minutes, 0);
 
@@ -129,60 +140,66 @@ export default function TimeTracker() {
     setEntries((data ?? []) as TimeEntry[]);
   }, [today, user]);
 
+  // Carga inteligente basada en la tabla 'tasks' y 'clients' según el rol
+  const loadOptions = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+
+    // 1. Consultar rol del usuario en profiles
+    let userRole = 'accountant';
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    if (profileData?.role) {
+      userRole = profileData.role.toLowerCase();
+    }
+
+    const isAdminOrSupervisor = userRole === 'admin' || userRole === 'supervisor';
+
+    // 2. Consulta de tareas en base al rol
+    let taskQuery = supabase.from('tasks').select('*');
+
+    if (!isAdminOrSupervisor) {
+      taskQuery = taskQuery.eq('assigned_to', user.id);
+    }
+
+    const [clientResult, taskResult] = await Promise.all([
+      supabase.from('clients').select('id,name').order('name'),
+      taskQuery,
+    ]);
+
+    if (clientResult.error || taskResult.error) {
+      setError(`No se pudieron cargar los datos: ${clientResult.error?.message ?? taskResult.error?.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const loadedClients = (clientResult.data ?? []) as Client[];
+    const rawTasks = taskResult.data ?? [];
+
+    setClients(loadedClients);
+
+    const formattedTasks: TaskItem[] = rawTasks.map((t) => ({
+      id: t.id,
+      title: t.title || t.activity || t.subactivity_name || 'Sin título',
+      project_id: t.project_id ?? null,
+      client_id: t.client_id ?? null,
+      assigned_to: t.assigned_to ?? null,
+    }));
+
+    setTasks(formattedTasks);
+    setLoading(false);
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
-    let active = true;
-    async function loadOptions() {
-      setLoading(true);
-
-      const [clientResult, subtaskResult] = await Promise.all([
-        supabase.from('clients').select('id,name').order('name'),
-        supabase.from('project_subtasks').select('id,project_name,subtask_name').order('project_name'),
-      ]);
-
-      if (!active) return;
-      const queryError = clientResult.error ?? subtaskResult.error;
-
-      if (queryError) {
-        setError(`No se pudieron cargar los datos: ${queryError.message}`);
-        setLoading(false);
-        return;
-      }
-      
-      setClients((clientResult.data ?? []) as Client[]);
-      const rawSubtasks = (subtaskResult.data ?? []) as any[];
-      setSubtasks(rawSubtasks as Subtask[]);
-
-      // Agrupamos los proyectos únicos por 'project_name'
-      const uniqueProjectsMap = new Map<string, Project>();
-      rawSubtasks.forEach((item) => {
-        if (!uniqueProjectsMap.has(item.project_name)) {
-          uniqueProjectsMap.set(item.project_name, {
-            id: item.id,
-            name: item.project_name,
-            client_id: '',
-          });
-        }
-      });
-      setProjects(Array.from(uniqueProjectsMap.values()));
-
-      // Mapeamos las subtareas reales como tareas disponibles
-      const mappedTasks: Task[] = rawSubtasks.map((item) => {
-        const matchingProject = uniqueProjectsMap.get(item.project_name);
-        return {
-          id: item.id,
-          title: item.subtask_name,
-          project_id: matchingProject ? matchingProject.id : item.id,
-        };
-      });
-      setTasks(mappedTasks);
-
-      setLoading(false);
-    }
     void loadOptions();
     void loadEntries();
-    return () => { active = false; };
-  }, [loadEntries, user]);
+  }, [loadOptions, loadEntries, user]);
 
   useEffect(() => {
     if (timerMode !== 'running' || activeSegmentStarted === null) return;
@@ -194,7 +211,7 @@ export default function TimeTracker() {
 
   function startTimer() {
     if (!taskId || !clientId) {
-      setError('Selecciona un cliente, proyecto y tarea antes de iniciar el cronómetro.');
+      setError('Selecciona un cliente y una tarea/actividad antes de iniciar el cronómetro.');
       return;
     }
     setError(null);
@@ -253,6 +270,12 @@ export default function TimeTracker() {
     setStartedAt(null);
     setActiveSegmentStarted(null);
     setElapsedSeconds(0);
+    localStorage.removeItem('timer_mode');
+    localStorage.removeItem('timer_client_id');
+    localStorage.removeItem('timer_task_id');
+    localStorage.removeItem('timer_started_at');
+    localStorage.removeItem('timer_active_segment');
+    localStorage.removeItem('timer_elapsed');
   }
 
   async function saveManualEntry(event: FormEvent<HTMLFormElement>) {
@@ -260,6 +283,7 @@ export default function TimeTracker() {
     if (!user || !taskId || !clientId || saving) return;
     setError(null);
     setNotice(null);
+
     const hours = Number(manualHours || 0);
     const minutes = Number(manualMinutes || 0);
     const durationMinutes = hours * 60 + minutes;
@@ -274,6 +298,7 @@ export default function TimeTracker() {
 
     const start = new Date(`${manualDate}T00:00:00`);
     const end = new Date(start.getTime() + durationMinutes * 60_000);
+
     setSaving(true);
     const { error: insertError } = await supabase.from('time_entries').insert({
       user_id: user.id,
@@ -297,15 +322,25 @@ export default function TimeTracker() {
     if (manualDate === today) await loadEntries();
   }
 
+  // Autoselección si elige primero la tarea
+  function handleTaskSelect(selectedTaskId: string) {
+    setTaskId(selectedTaskId);
+    if (!selectedTaskId) return;
+    const task = tasks.find((t) => t.id === selectedTaskId);
+    if (task && task.client_id) {
+      setClientId(task.client_id);
+    }
+  }
+
   const selectedTaskLabel = (id: string) => {
-    const subtask = subtasks.find((item) => item.id === id);
-    return subtask ? `${subtask.subtask_name} (${subtask.project_name})` : 'Tarea';
+    const task = tasks.find((item) => item.id === id);
+    return task ? task.title : 'Actividad';
   };
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <section className="rounded-2xl bg-white p-5 shadow-sm sm:p-7">
-        <div className="mb-5"><p className="text-sm font-semibold uppercase tracking-wider text-blue-600">Control de tiempo</p><h2 className="mt-1 text-2xl font-bold text-slate-900">Time Tracker</h2><p className="mt-1 text-sm text-slate-500">Registra el tiempo dedicado a tus tareas.</p></div>
+        <div className="mb-5"><p className="text-sm font-semibold uppercase tracking-wider text-blue-600">Control de tiempo</p><h2 className="mt-1 text-2xl font-bold text-slate-900">Time Tracker</h2><p className="mt-1 text-sm text-slate-500">Registra el tiempo dedicado a tus actividades y tareas asignadas.</p></div>
         {error && <p role="alert" className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
         {notice && <p role="status" className="mb-4 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{notice}</p>}
 
@@ -313,25 +348,32 @@ export default function TimeTracker() {
           {/* MODO EN VIVO */}
           <section className="rounded-xl border border-slate-200 p-4 sm:p-5">
             <h3 className="text-lg font-semibold text-slate-900">Modo en vivo</h3>
-            <p className="mt-1 text-sm text-slate-500">Inicia, pausa y detén el cronómetro para guardar el tiempo.</p>
+            <p className="mt-1 text-sm text-slate-500">Inicia, pausa y detén el cronómetro para guardar tu tiempo.</p>
             <div className="mt-4 grid gap-3">
               <label className="text-sm font-medium text-slate-700">Cliente
-                <select value={clientId} onChange={(event) => { setClientId(event.target.value); setProjectId(''); setTaskId(''); }} disabled={loading || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal">
-                  <option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                </select>
-              </label>
-              
-              <label className="text-sm font-medium text-slate-700">Proyecto
-                <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setTaskId(''); }} disabled={loading || !clientId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
-                  <option value="">Selecciona un proyecto</option>
-                  {availableProjects.map((project) => <option key={project.id} value={project.name}>{project.name}</option>)}
+                <select 
+                  value={clientId} 
+                  onChange={(event) => { 
+                    setClientId(event.target.value); 
+                    setTaskId(''); 
+                  }} 
+                  disabled={loading || timerMode !== 'idle'} 
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal"
+                >
+                  <option value="">Selecciona un cliente</option>
+                  {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
                 </select>
               </label>
 
-              <label className="text-sm font-medium text-slate-700">Tarea
-                <select value={taskId} onChange={(event) => setTaskId(event.target.value)} disabled={loading || !projectId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
-                  <option value="">Selecciona una tarea</option>
-                  {availableSubtasks.map((sub) => <option key={sub.id} value={sub.id}>{sub.subtask_name}</option>)}
+              <label className="text-sm font-medium text-slate-700">Tarea / Actividad
+                <select 
+                  value={taskId} 
+                  onChange={(event) => handleTaskSelect(event.target.value)} 
+                  disabled={loading || timerMode !== 'idle'} 
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"
+                >
+                  <option value="">Selecciona una tarea o actividad</option>
+                  {availableTasks.map((sub) => <option key={sub.id} value={sub.id}>{sub.title}</option>)}
                 </select>
               </label>
             </div>
@@ -353,27 +395,45 @@ export default function TimeTracker() {
             <p className="mt-1 text-sm text-slate-500">Registra tiempo trabajado fuera del cronómetro.</p>
             <form onSubmit={(event) => void saveManualEntry(event)} className="mt-4 space-y-3">
               <label className="block text-sm font-medium text-slate-700">Cliente
-                <select value={clientId} onChange={(event) => { setClientId(event.target.value); setProjectId(''); setTaskId(''); }} required disabled={timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
-              </label>
-
-              <label className="block text-sm font-medium text-slate-700">Proyecto
-                <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setTaskId(''); }} required disabled={!clientId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
-                  <option value="">Selecciona un proyecto</option>
-                  {availableProjects.map((project) => <option key={project.id} value={project.name}>{project.name}</option>)}
+                <select 
+                  value={clientId} 
+                  onChange={(event) => { 
+                    setClientId(event.target.value); 
+                    setTaskId(''); 
+                  }} 
+                  required 
+                  disabled={timerMode !== 'idle'} 
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"
+                >
+                  <option value="">Selecciona un cliente</option>
+                  {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
                 </select>
               </label>
 
-              <label className="block text-sm font-medium text-slate-700">Tarea
-                <select value={taskId} onChange={(event) => setTaskId(event.target.value)} required disabled={!projectId || timerMode !== 'idle'} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50">
-                  <option value="">Selecciona una tarea</option>
-                  {availableSubtasks.map((sub) => <option key={sub.id} value={sub.id}>{sub.subtask_name}</option>)}
+              <label className="block text-sm font-medium text-slate-700">Tarea / Actividad
+                <select 
+                  value={taskId} 
+                  onChange={(event) => handleTaskSelect(event.target.value)} 
+                  required 
+                  disabled={timerMode !== 'idle'} 
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal disabled:bg-slate-50"
+                >
+                  <option value="">Selecciona una tarea o actividad</option>
+                  {availableTasks.map((sub) => <option key={sub.id} value={sub.id}>{sub.title}</option>)}
                 </select>
               </label>
 
               <label className="block text-sm font-medium text-slate-700">Fecha
-                <input type="date" value={manualDate} max={today} onChange={(event) => setManualDate(event.target.value)} required className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" />
+                <input 
+                  type="date" 
+                  value={manualDate} 
+                  min={today}
+                  onChange={(event) => setManualDate(event.target.value)} 
+                  required 
+                  className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" 
+                />
               </label>
-              
+
               <div className="grid grid-cols-2 gap-3">
                 <label className="text-sm font-medium text-slate-700">Horas
                   <input type="number" min="0" step="1" value={manualHours} onChange={(event) => setManualHours(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" placeholder="0" />
