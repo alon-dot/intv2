@@ -6,6 +6,7 @@ export function ClipboardList(props: IconProps) { return <Icon {...props}><rect 
 export function Clock3(props: IconProps) { return <Icon {...props}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></Icon>; }
 export function BriefcaseBusiness(props: IconProps) { return <Icon {...props}><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18M10 12v2h4v-2"/></Icon>; }
 export function History(props: IconProps) { return <Icon {...props}><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></Icon>; }
+export function CalendarDays(props: IconProps) { return <Icon {...props}><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></Icon>; }
 export function Users(props: IconProps) { return <Icon {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM20 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></Icon>; }
 export function ChartNoAxesCombined(props: IconProps) { return <Icon {...props}><path d="M3 3v18h18M7 14l4-4 4 3 6-7"/><path d="M17 6h4v4"/></Icon>; }
 export function Activity(props: IconProps) { return <Icon {...props}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></Icon>; }

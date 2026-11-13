@@ -3,13 +3,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { useFormDraft } from '../hooks/useFormDraft';
 import { logActivity } from '../lib/activityLogs';
+import { REGIMENES_SAT, regimenSatLabel, type TipoPersona } from '../constants/regimenesSat';
 
 type Client = { id: string; name: string; tax_id: string | null; tax_regime?: string | string[] | null; tax_regimes?: string[] | null; contact_email: string | null; phone: string | null; [key: string]: any };
 type Project = { id: string; client_id: string; name: string };
 type Task = { id: string; title: string; status: string; project_id: string; assigned_to: string | null; created_at: string; due_date: string | null };
 type TimeEntry = { id: string; client_id?: string; task_id: string; user_id: string; start_time: string | null; created_at: string; duration_minutes: number; is_manual: boolean; justification: string | null };
 type TimelineEvent = { id: string; date: string | null; type: 'task' | 'time'; task: Task; entry?: TimeEntry; actorName: string };
-type ClientDraft = { clientName: string; taxId: string; taxRegime: string; contactEmail: string; phone: string; clientFields: Record<string, string>; editingClientId: string | null; showClientForm: boolean };
+type ClientDraft = { clientName: string; taxId: string; taxRegime: string; obligaciones: string[]; contactEmail: string; phone: string; clientFields: Record<string, string>; editingClientId: string | null; showClientForm: boolean };
 
 function formatMinutes(minutes: number) {
   const hours = Math.floor(minutes / 60);
@@ -75,6 +76,7 @@ export default function ClientHistory() {
   const [clientName, setClientName] = useState('');
   const [taxId, setTaxId] = useState('');
   const [taxRegime, setTaxRegime] = useState('');
+  const [obligaciones, setObligaciones] = useState<string[]>([]);
   const [contactEmail, setContactEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [savingClient, setSavingClient] = useState(false);
@@ -83,11 +85,12 @@ export default function ClientHistory() {
   const [clientFields, setClientFields] = useState<Record<string, string>>({});
   const [draftEditingClientId, setDraftEditingClientId] = useState<string | null>(null);
   const clientFieldNames = ['industry','person_type','payment_method','assigned_accountant_id','postal_code','street','exterior_number','interior_number','neighborhood','city','state','has_employees','payroll_frequency','primary_contact_name','primary_contact_phone','primary_contact_email','primary_contact_title','payment_contact_name','payment_contact_phone','payment_contact_email','payment_contact_title'];
-  const regimes = ['601 - General de Ley Personas Morales','603 - Personas Morales con Fines no Lucrativos','605 - Sueldos y Salarios e Ingresos Asimilados a Salarios','606 - Arrendamiento','607 - Enajenación o Adquisición de Bienes','608 - Demás ingresos','610 - Residentes en el Extranjero sin Establecimiento Permanente en México','611 - Ingresos por Dividendos','612 - Personas Físicas con Actividades Empresariales y Profesionales','614 - Ingresos por intereses','615 - Ingresos por obtención de premios','616 - Sin obligaciones fiscales','620 - Sociedades Cooperativas de Producción','621 - Incorporación Fiscal','622 - Actividades Agrícolas, Ganaderas, Silvícolas y Pesqueras','623 - Opcional para Grupos de Sociedades','624 - Coordinados','625 - Plataformas Tecnológicas','626 - Régimen Simplificado de Confianza'];
-
-  const clientDraft = useMemo<ClientDraft>(() => ({ clientName, taxId, taxRegime, contactEmail, phone, clientFields, editingClientId: editingClient?.id ?? draftEditingClientId, showClientForm }), [clientName, taxId, taxRegime, contactEmail, phone, clientFields, editingClient, draftEditingClientId, showClientForm]);
+  const tipoPersona = (clientFields.person_type === 'MORAL' ? 'MORAL' : clientFields.person_type === 'FISICA' || clientFields.person_type === 'PHYSICAL' ? 'FISICA' : '') as TipoPersona | '';
+  const regimenesDisponibles = tipoPersona ? REGIMENES_SAT[tipoPersona] : [];
+  const regimenSeleccionado = regimenesDisponibles.find((regimen) => regimenSatLabel(regimen) === taxRegime) ?? null;
+  const clientDraft = useMemo<ClientDraft>(() => ({ clientName, taxId, taxRegime, obligaciones, contactEmail, phone, clientFields, editingClientId: editingClient?.id ?? draftEditingClientId, showClientForm }), [clientName, taxId, taxRegime, obligaciones, contactEmail, phone, clientFields, editingClient, draftEditingClientId, showClientForm]);
   const restoreClientDraft = useCallback((draft: Partial<ClientDraft> | null) => {
-    setClientName(draft?.clientName ?? ''); setTaxId(draft?.taxId ?? ''); setTaxRegime(draft?.taxRegime ?? '');
+    setClientName(draft?.clientName ?? ''); setTaxId(draft?.taxId ?? ''); setTaxRegime(draft?.taxRegime ?? ''); setObligaciones(Array.isArray(draft?.obligaciones) ? draft.obligaciones : []);
     setContactEmail(draft?.contactEmail ?? ''); setPhone(draft?.phone ?? '');
     setClientFields(draft?.clientFields && typeof draft.clientFields === 'object' ? draft.clientFields : {});
     setDraftEditingClientId(draft?.editingClientId ?? null);
@@ -134,7 +137,14 @@ export default function ClientHistory() {
     setEditingClient(client ?? null);
     setClientName(client?.name ?? '');
     setTaxId(client?.tax_id ?? '');
-    setTaxRegime(parseTaxRegimes(client?.tax_regime ?? client?.tax_regimes).join(', '));
+    const storedRegime = parseTaxRegimes(client?.tax_regime ?? client?.tax_regimes)[0] ?? '';
+    const storedType = String(client?.person_type ?? client?.tipo_persona ?? '');
+    const normalizedType: TipoPersona | '' = ['MORAL'].includes(storedType.toUpperCase()) ? 'MORAL' : ['PHYSICAL', 'FISICA', 'FÍSICA'].includes(storedType.toUpperCase()) ? 'FISICA' : '';
+    const regimeOptions = normalizedType ? REGIMENES_SAT[normalizedType] : [];
+    const selectedRegime = regimeOptions.find((regime) => regimenSatLabel(regime) === storedRegime || `${regime.codigo} - ${regime.nombre}` === storedRegime || storedRegime.includes(regime.codigo)) ?? null;
+    setTaxRegime(selectedRegime ? regimenSatLabel(selectedRegime) : '');
+    const savedObligations = Array.isArray(client?.obligations) ? client.obligations : [];
+    setObligaciones(savedObligations.map((item: any) => typeof item === 'string' ? item : item?.id).filter(Boolean));
     setContactEmail(client?.contact_email ?? '');
     setPhone(client?.phone ?? '');
     const fieldAliases: Record<string, string> = {
@@ -146,7 +156,8 @@ export default function ClientHistory() {
       primary_contact_title: 'main_contact_position',
       payment_contact_title: 'payment_contact_position',
     };
-    setClientFields(Object.fromEntries(clientFieldNames.map((field) => [field, String(client?.[field] ?? client?.[fieldAliases[field]] ?? '')])));
+    setClientFields(Object.fromEntries(clientFieldNames.map((field) => [field, String(field === 'person_type' && normalizedType ? normalizedType : client?.[field] ?? client?.[fieldAliases[field]] ?? '')])));
+    if (selectedRegime && !savedObligations.length) setObligaciones(selectedRegime.obligaciones.filter((item) => item.predeterminada).map((item) => item.id));
     setError(null); setNotice(null);
   }
 
@@ -159,14 +170,18 @@ export default function ClientHistory() {
     const clientData = {
       name: clientName.trim(),
       payment_method: clientFields.payment_method ?? '',
-      person_type: clientFields.person_type ?? '',
+      person_type: clientFields.person_type === 'FISICA' ? 'PHYSICAL' : clientFields.person_type ?? '',
       assigned_accountant_id: clientFields.assigned_accountant_id || null,
       business_name: clientName.trim(),
       giro,
       industry: giro,
       line_of_business: giro,
       phone: phone.trim(),
-      tax_regime: parseTaxRegimes(taxRegime),
+      tax_regime: taxRegime ? [taxRegime] : [],
+      obligations: obligaciones.map((id) => {
+        const obligation = regimenSeleccionado?.obligaciones.find((item) => item.id === id);
+        return obligation ? { id: obligation.id, nombre: obligation.nombre, detalle: obligation.detalle ?? null } : null;
+      }).filter(Boolean),
       postal_code: clientFields.postal_code ?? '',
       email: contactEmail.trim(),
       street: clientFields.street ?? '',
@@ -290,10 +305,12 @@ export default function ClientHistory() {
         {event.entry && <p className="mt-2 text-sm text-slate-600">{event.entry.is_manual ? 'Entrada manual' : 'Cronómetro'}{event.entry.justification ? ` · Justificación: ${event.entry.justification}` : ''}</p>}
       </li>)}</ol>}
     </section>}
-    {showClientForm && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingClient) setShowClientForm(false); }}><section role="dialog" aria-modal="true" aria-labelledby="client-form-title" className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"><h3 id="client-form-title" className="text-xl font-bold">{editingClient ? 'Editar cliente' : 'Crear cliente'}</h3><form onSubmit={(event) => void saveClient(event)} className="mt-5 grid gap-3 sm:grid-cols-2">
+    {showClientForm && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingClient) setShowClientForm(false); }}><section role="dialog" aria-modal="true" aria-labelledby="client-form-title" className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 text-slate-900 shadow-2xl dark:bg-slate-900 dark:text-slate-100"><h3 id="client-form-title" className="text-xl font-bold">{editingClient ? 'Editar cliente' : 'Crear cliente'}</h3><form onSubmit={(event) => void saveClient(event)} className="mt-5 grid gap-3 sm:grid-cols-2">
       <label className="text-sm font-medium">Nombre / razón social<input required value={clientName} onChange={(e) => setClientName(e.target.value)} className="mt-1 w-full rounded-lg border p-2.5" /></label><label className="text-sm font-medium">Giro<input value={clientFields.industry ?? ''} onChange={(e) => setClientFields({...clientFields,industry:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5" /></label>
-      <label className="text-sm font-medium">Tipo de persona<select value={clientFields.person_type ?? ''} onChange={(e) => setClientFields({...clientFields,person_type:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">Selecciona</option><option value="PHYSICAL">Física</option><option value="MORAL">Moral</option></select></label><label className="text-sm font-medium">Forma de pago<select value={clientFields.payment_method ?? ''} onChange={(e) => setClientFields({...clientFields,payment_method:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">Selecciona</option><option value="CASH">Efectivo</option><option value="TRANSFER">Transferencia</option></select></label>
-      <label className="text-sm font-medium">RFC<input value={taxId} onChange={(e) => setTaxId(e.target.value.toUpperCase())} className="mt-1 w-full rounded-lg border p-2.5" /></label><fieldset className="rounded-xl border border-slate-200 p-3"><legend className="px-1 text-sm font-medium">Regímenes fiscales</legend><p className="mb-2 text-xs text-slate-500">Marca uno o varios regímenes.</p><div className="max-h-40 space-y-1 overflow-y-auto pr-2">{regimes.map((regime) => <label key={regime} className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-slate-50"><input type="checkbox" checked={parseTaxRegimes(taxRegime).includes(regime)} onChange={(event) => { const selected = new Set(parseTaxRegimes(taxRegime)); if (event.target.checked) selected.add(regime); else selected.delete(regime); setTaxRegime(Array.from(selected).join(', ')); }} className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" /><span>{regime}</span></label>)}</div></fieldset>
+      <label className="text-sm font-medium">Tipo de persona<select required value={tipoPersona} onChange={(e) => { setClientFields({...clientFields,person_type:e.target.value}); setTaxRegime(''); setObligaciones([]); }} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"><option value="">Selecciona</option><option value="FISICA">Física</option><option value="MORAL">Moral</option></select></label><label className="text-sm font-medium">Forma de pago<select value={clientFields.payment_method ?? ''} onChange={(e) => setClientFields({...clientFields,payment_method:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">Selecciona</option><option value="CASH">Efectivo</option><option value="TRANSFER">Transferencia</option></select></label>
+      <label className="text-sm font-medium">RFC<input value={taxId} onChange={(e) => setTaxId(e.target.value.toUpperCase())} className="mt-1 w-full rounded-lg border p-2.5" /></label>
+      <label className="text-sm font-medium">Régimen fiscal<select required disabled={!tipoPersona} value={taxRegime} onChange={(e) => { const selected = regimenesDisponibles.find((regimen) => regimenSatLabel(regimen) === e.target.value); setTaxRegime(e.target.value); setObligaciones(selected?.obligaciones.filter((item) => item.predeterminada).map((item) => item.id) ?? []); }} className="mt-1 w-full rounded-lg border border-slate-300 bg-white p-2.5 text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:disabled:bg-slate-700"><option value="">{tipoPersona ? 'Selecciona un régimen' : 'Primero selecciona el tipo de persona'}</option>{regimenesDisponibles.map((regimen) => <option key={regimen.codigo} value={regimenSatLabel(regimen)}>{regimenSatLabel(regimen)}</option>)}</select></label>
+      {regimenSeleccionado && <fieldset className="rounded-xl border border-slate-200 p-3 sm:col-span-2 dark:border-slate-700"><legend className="px-1 text-sm font-semibold">Obligaciones fiscales</legend><p className="mb-2 text-xs text-slate-500">Las obligaciones del régimen están seleccionadas por defecto; puedes ajustar las opcionales.</p><div className="grid gap-2 sm:grid-cols-2">{regimenSeleccionado.obligaciones.map((obligation) => <label key={obligation.id} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 text-sm hover:bg-slate-50 dark:hover:bg-slate-800"><input type="checkbox" checked={obligaciones.includes(obligation.id)} disabled={obligation.obligatoria} onChange={(event) => setObligaciones((current) => event.target.checked ? [...new Set([...current, obligation.id])] : current.filter((id) => id !== obligation.id))} className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-70" /><span><span className="font-medium">{obligation.nombre}</span>{obligation.detalle && <span className="ml-1 text-xs text-slate-500">· {obligation.detalle}</span>}{obligation.obligatoria && <span className="ml-1 text-xs text-blue-700 dark:text-blue-300">Obligatoria</span>}</span></label>)}</div></fieldset>}
       <label className="text-sm font-medium">Contador asignado<select value={clientFields.assigned_accountant_id ?? ''} onChange={(e) => setClientFields({...clientFields,assigned_accountant_id:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">Sin asignar</option>{accountants.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}</select></label><label className="text-sm font-medium">Correo de contacto<input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="mt-1 w-full rounded-lg border p-2.5" /></label><label className="text-sm font-medium">Teléfono<input value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1 w-full rounded-lg border p-2.5" /></label>
       {['postal_code','street','exterior_number','interior_number','neighborhood','city','state'].map((field) => <label key={field} className="text-sm font-medium">{{postal_code:'C.P.',street:'Calle',exterior_number:'No. exterior',interior_number:'No. interior',neighborhood:'Colonia',city:'Ciudad',state:'Estado'}[field]}<input value={clientFields[field] ?? ''} onChange={(e) => setClientFields({...clientFields,[field]:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5" /></label>)}
       <label className="text-sm font-medium">¿Tiene trabajadores?<select value={clientFields.has_employees ?? ''} onChange={(e) => setClientFields({...clientFields,has_employees:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">Selecciona</option><option value="true">Sí</option><option value="false">No</option></select></label><label className="text-sm font-medium">Tipo de nómina<select value={clientFields.payroll_frequency ?? ''} onChange={(e) => setClientFields({...clientFields,payroll_frequency:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">No aplica</option><option value="WEEKLY">Semanal</option><option value="BIWEEKLY">Quincenal</option><option value="MONTHLY">Mensual</option></select></label>
