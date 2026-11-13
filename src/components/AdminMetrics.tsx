@@ -248,18 +248,84 @@ export default function AdminMetrics() {
 
   return (
     <DashboardShell title="Rendimiento y Métricas">
+      <div className="print-report">
       <style>{`
         @media print {
           @page {
-            size: letter portrait;
-            margin: 6mm;
+            size: auto;
+            margin: 0mm;
+          }
+          *, *::before, *::after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           body {
             background-color: #ffffff !important;
             color: #0f172a !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
-            zoom: 0.73;
+          }
+          .min-h-screen {
+            display: block !important;
+            min-height: 0 !important;
+            background: #ffffff !important;
+          }
+          .min-h-screen > div:first-child,
+          aside,
+          header:not(.print-header) {
+            display: none !important;
+          }
+          main {
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          .print-report {
+            box-sizing: border-box !important;
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 10mm !important;
+            font-size: 11pt !important;
+          }
+          .print-header > div:first-child {
+            display: flex !important;
+            width: 100% !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            gap: 12px !important;
+          }
+          .print-header > div:first-child > div:first-child {
+            display: flex !important;
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .print-header img {
+            display: block !important;
+            width: 82px !important;
+            height: 58px !important;
+            flex: 0 0 82px !important;
+            object-fit: contain !important;
+          }
+          .print-header > div:first-child > div:last-child {
+            flex: 0 0 auto !important;
+            margin-left: auto !important;
+          }
+          .print-report .text-xs {
+            font-size: 10pt !important;
+            line-height: 1.35 !important;
+          }
+          .print-report .text-sm {
+            font-size: 11pt !important;
+            line-height: 1.4 !important;
+          }
+          .print-report [class*="text-[10px]"] {
+            font-size: 9pt !important;
+          }
+          .print-report [class*="text-[11px]"] {
+            font-size: 9.5pt !important;
           }
           button, .no-print {
             display: none !important;
@@ -282,13 +348,41 @@ export default function AdminMetrics() {
             border: 1px solid #cbd5e1 !important;
             box-shadow: none !important;
             background-color: #ffffff !important;
-            margin-bottom: 8px !important;
+            margin-bottom: 5px !important;
           }
           .mb-6 {
-            margin-bottom: 10px !important;
+            margin-bottom: 6px !important;
           }
           .p-6, .p-5, .p-4 {
-            padding: 10px !important;
+            padding: 8px !important;
+          }
+          .print-report .gap-6 {
+            gap: 8px !important;
+          }
+          .print-report .gap-4 {
+            gap: 6px !important;
+          }
+          .print-report .my-4 {
+            margin-top: 6px !important;
+            margin-bottom: 6px !important;
+          }
+          .print-report .mt-4 {
+            margin-top: 6px !important;
+          }
+          .print-header {
+            break-inside: avoid;
+            page-break-inside: avoid;
+            margin-bottom: 6px !important;
+            padding-bottom: 5px !important;
+          }
+          .print-meta-box {
+            padding: 5px 8px !important;
+            margin-top: 5px !important;
+          }
+          .print-report > .mb-6,
+          .print-report > .rounded-2xl {
+            break-inside: avoid;
+            page-break-inside: avoid;
           }
         }
         .print-header {
@@ -300,8 +394,11 @@ export default function AdminMetrics() {
       <div className="print-header">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-base font-bold text-slate-900 leading-tight">Téllez Ponce & Asociados</h1>
+            <img src="/Telles%20Ponce%20Blanco.svg" alt="Logo Téllez Ponce & Asociados" />
+            <div>
+              <h1 className="text-base font-bold text-slate-900 leading-tight">Téllez Ponce & Asociados</h1>
             <p className="text-[11px] text-slate-600 font-medium">Reporte Ejecutivo de Rendimiento, Operación y Supervisión</p>
+            </div>
           </div>
           <div className="text-right">
             <p className="text-xs font-semibold text-slate-800 capitalize">{formattedReportDate}</p>
@@ -538,7 +635,7 @@ export default function AdminMetrics() {
 
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-colors">
           <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Analítica de Costo por Cliente (Top 3)</h3>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Analítica de Costo por Cliente</h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Comparativa de horas acumuladas por cuenta.</p>
           </div>
 
@@ -565,7 +662,7 @@ export default function AdminMetrics() {
               })
             )}
           </div>
-          <p className="text-[11px] text-slate-400 italic">Evaluación de rentabilidad y consumo de recursos por cuenta.</p>
+          <p className="text-[11px] text-slate-400 italic">Evaluación de rentabilidad y consumo de recursos por cliente.</p>
         </div>
       </div>
 
@@ -589,6 +686,7 @@ export default function AdminMetrics() {
             </p>
           </div>
         </div>
+      </div>
       </div>
     </DashboardShell>
   );
