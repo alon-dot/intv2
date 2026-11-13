@@ -91,11 +91,17 @@ export default function ClientHistory() {
   const [accountants, setAccountants] = useState<{ id: string; full_name: string }[]>([]);
   const [clientFields, setClientFields] = useState<Record<string, string>>({});
   const [draftEditingClientId, setDraftEditingClientId] = useState<string | null>(null);
+  
+  // Estados para el filtro de calendario en la Línea de tiempo
+  const [timelineStartDate, setTimelineStartDate] = useState('');
+  const [timelineEndDate, setTimelineEndDate] = useState('');
+
   const clientFieldNames = ['industry','person_type','payment_method','assigned_accountant_id','postal_code','street','exterior_number','interior_number','neighborhood','city','state','has_employees','payroll_frequency','primary_contact_name','primary_contact_phone','primary_contact_email','primary_contact_title','payment_contact_name','payment_contact_phone','payment_contact_email','payment_contact_title'];
   const tipoPersona = (clientFields.person_type === 'MORAL' ? 'MORAL' : clientFields.person_type === 'FISICA' || clientFields.person_type === 'PHYSICAL' ? 'FISICA' : '') as TipoPersona | '';
   const regimenesDisponibles = tipoPersona ? REGIMENES_SAT[tipoPersona] : [];
   const regimenSeleccionado = regimenesDisponibles.find((regimen) => regimenSatLabel(regimen) === taxRegime) ?? null;
   const clientDraft = useMemo<ClientDraft>(() => ({ clientName, taxId, taxRegime, obligaciones, contactEmail, phone, clientFields, editingClientId: editingClient?.id ?? draftEditingClientId, showClientForm }), [clientName, taxId, taxRegime, obligaciones, contactEmail, phone, clientFields, editingClient, draftEditingClientId, showClientForm]);
+  
   const restoreClientDraft = useCallback((draft: Partial<ClientDraft> | null) => {
     setClientName(draft?.clientName ?? ''); setTaxId(draft?.taxId ?? ''); setTaxRegime(draft?.taxRegime ?? ''); setObligaciones(Array.isArray(draft?.obligaciones) ? draft.obligaciones : []);
     setContactEmail(draft?.contactEmail ?? ''); setPhone(draft?.phone ?? '');
@@ -185,7 +191,6 @@ export default function ClientHistory() {
       industry: giro,
       line_of_business: giro,
       phone: phone.trim(),
-      // `clients` uses `tax_id` for the RFC throughout the existing app.
       tax_id: taxId.trim().toUpperCase() || null,
       tax_regime: taxRegime ? [taxRegime] : [],
       obligations: obligaciones.map((id) => {
@@ -243,7 +248,6 @@ export default function ClientHistory() {
       
       const projectIds = projects.filter((project) => project.client_id === selectedId).map((project) => project.id);
       
-      // Cargamos tareas si existen proyectos
       let taskRows: Task[] = [];
       if (projectIds.length > 0) {
         const { data: taskData, error: taskError } = await supabase.from('tasks')
@@ -255,7 +259,6 @@ export default function ClientHistory() {
       }
       setTasks(taskRows);
 
-      // CAMBIO CLAVE: Consultamos los registros de tiempo directamente filtrando por client_id
       const { data: entryData, error: entryError } = await supabase.from('time_entries')
         .select('id,client_id,task_id,user_id,start_time,created_at,duration_minutes,is_manual,justification')
         .eq('client_id', selectedId)
@@ -289,19 +292,36 @@ export default function ClientHistory() {
   
   const selectedClient = clients.find((client) => client.id === selectedId) ?? null;
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
-  const completedTasks = tasks.filter((task) => task.status.toLowerCase() === 'completed').length;
-  const pendingTasks = tasks.length - completedTasks;
-  const totalMinutes = entries.reduce((sum, entry) => sum + (Number(entry.duration_minutes) || 0), 0);
-  
-  const timeline = useMemo<TimelineEvent[]>(() => [
-    ...tasks.map((task): TimelineEvent => ({ id: `task-${task.id}`, date: task.created_at, type: 'task', task, actorName: task.assigned_to ? names[task.assigned_to] ?? 'Contador' : 'Sin asignar' })),
-    ...entries.flatMap((entry) => {
-      const task = taskById.get(entry.task_id);
-      // Si la tarea existe en la lista local o queremos mostrar el registro vinculado por cliente:
-      const fallbackTask = task ?? { id: entry.task_id, title: 'Actividad registrada', status: 'completed', project_id: '', assigned_to: null, created_at: entry.start_time ?? entry.created_at, due_date: null };
-      return [{ id: `entry-${entry.id}`, date: entry.start_time ?? entry.created_at, type: 'time' as const, task: fallbackTask, entry, actorName: names[entry.user_id] ?? 'Contador' }];
-    }),
-  ].sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()), [entries, names, taskById, tasks]);
+
+  // Filtrado de la Línea de tiempo según el rango de fechas seleccionado
+  const filteredTimelineEvents = useMemo(() => {
+    const rawEvents: TimelineEvent[] = [
+      ...tasks.map((task): TimelineEvent => ({ id: `task-${task.id}`, date: task.created_at, type: 'task', task, actorName: task.assigned_to ? names[task.assigned_to] ?? 'Contador' : 'Sin asignar' })),
+      ...entries.flatMap((entry) => {
+        const task = taskById.get(entry.task_id);
+        const fallbackTask = task ?? { id: entry.task_id, title: 'Actividad registrada', status: 'completed', project_id: '', assigned_to: null, created_at: entry.start_time ?? entry.created_at, due_date: null };
+        return [{ id: `entry-${entry.id}`, date: entry.start_time ?? entry.created_at, type: 'time' as const, task: fallbackTask, entry, actorName: names[entry.user_id] ?? 'Contador' }];
+      }),
+    ];
+
+    return rawEvents.filter((event) => {
+      if (!event.date) return true;
+      const eventDateStr = event.date.slice(0, 10);
+      if (timelineStartDate && eventDateStr < timelineStartDate) return false;
+      if (timelineEndDate && eventDateStr > timelineEndDate) return false;
+      return true;
+    }).sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime());
+  }, [tasks, entries, taskById, names, timelineStartDate, timelineEndDate]);
+
+  // Horas acumuladas netas calculadas únicamente en base a los eventos filtrados
+  const totalMinutesFiltered = useMemo(() => {
+    return filteredTimelineEvents.reduce((sum, event) => {
+      if (event.type === 'time' && event.entry) {
+        return sum + (Number(event.entry.duration_minutes) || 0);
+      }
+      return sum;
+    }, 0);
+  }, [filteredTimelineEvents]);
 
   return <div className="mx-auto max-w-7xl space-y-6">
     <section className="rounded-2xl bg-white p-5 shadow-sm sm:p-7">
@@ -312,15 +332,31 @@ export default function ClientHistory() {
         <div><label htmlFor="client-search" className="mb-1 block text-sm font-medium text-slate-700">Buscar cliente</label><input id="client-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nombre o RFC" className="w-full rounded-lg border border-slate-300 px-3 py-2.5" />
           <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-slate-200" aria-label="Lista de clientes">{loadingClients ? <p className="p-4 text-sm text-slate-500">Cargando clientes…</p> : filteredClients.length === 0 ? <p className="p-4 text-sm text-slate-500">No se encontraron clientes.</p> : <ul className="divide-y divide-slate-100">{filteredClients.map((client) => <li key={client.id}><button type="button" onClick={() => setSelectedId(client.id)} aria-pressed={selectedId === client.id} className={`w-full px-4 py-3 text-left ${selectedId === client.id ? 'bg-blue-50 text-blue-800' : 'hover:bg-slate-50'}`}><span className="block font-semibold">{client.name}</span><span className="mt-0.5 block text-xs text-slate-500">RFC: {client.tax_id || 'No registrado'}</span></button></li>)}</ul>}</div>
         </div>
-        {selectedClient ? <div className="rounded-xl border border-slate-200 p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Información general</p><h3 className="mt-1 text-xl font-bold text-slate-900">{selectedClient.name}</h3></div><div className="flex items-center gap-2"><span className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{formatMinutes(totalMinutes)} acumuladas</span>{canManageClients && <button type="button" onClick={() => openClientForm(selectedClient)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar cliente</button>}</div></div>
+        {selectedClient ? <div className="rounded-xl border border-slate-200 p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Información general</p><h3 className="mt-1 text-xl font-bold text-slate-900">{selectedClient.name}</h3></div><div className="flex items-center gap-2">
+          {/* Se evalúa estrictamente que sea mayor a 0 para mostrar el recuadro de minutos acumulados */}
+          {totalMinutesFiltered > 0 && (
+            <span className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{formatMinutes(totalMinutesFiltered)} acumuladas</span>
+          )}
+          {canManageClients && <button type="button" onClick={() => openClientForm(selectedClient)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar cliente</button>}</div></div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">RFC</dt><dd className="font-medium text-slate-800">{selectedClient.tax_id || 'No registrado'}</dd></div><div><dt className="text-slate-500">Régimen fiscal</dt><dd className="font-medium text-slate-800">{formatTaxRegime(selectedClient.tax_regime ?? selectedClient.tax_regimes)}</dd></div><div><dt className="text-slate-500">Email de contacto</dt><dd className="font-medium text-slate-800">{selectedClient.contact_email || 'No registrado'}</dd></div><div><dt className="text-slate-500">Teléfono</dt><dd className="font-medium text-slate-800">{selectedClient.phone || 'No registrado'}</dd></div></dl>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">{[['Giro',selectedClient.industry],['Tipo de persona',formatPersonType(selectedClient.person_type ?? selectedClient.tipo_persona)],['Forma de pago',selectedClient.payment_method],['Contador asignado',accountants.find((person) => person.id === selectedClient.assigned_accountant_id)?.full_name],['Domicilio', [selectedClient.street,selectedClient.exterior_number,selectedClient.interior_number,selectedClient.neighborhood,selectedClient.postal_code,selectedClient.city,selectedClient.state].filter(Boolean).join(', ')],['Nómina',selectedClient.has_employees ? `Sí \u00b7 ${selectedClient.payroll_frequency ?? ''}` : selectedClient.has_employees === false ? 'Sin trabajadores' : null],['Contacto principal', [selectedClient.primary_contact_name,selectedClient.primary_contact_title,selectedClient.primary_contact_phone,selectedClient.primary_contact_email].filter(Boolean).join(' \u00b7 ')],['Contacto de pagos', [selectedClient.payment_contact_name,selectedClient.payment_contact_title,selectedClient.payment_contact_phone,selectedClient.payment_contact_email].filter(Boolean).join(' \u00b7 ') ]].map(([label,value]) => <div key={String(label)}><dt className="text-slate-500">{label}</dt><dd className="font-medium text-slate-800">{value || 'No registrado'}</dd></div>)}</dl>
         </div> : <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">{loadingClients ? 'Cargando expediente…' : 'Selecciona un cliente para abrir su expediente.'}</div>}
       </div>
     </section>
 
-    {selectedClient && <section className="rounded-2xl bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold uppercase tracking-wider text-slate-400">Actividad del cliente</p><h2 className="mt-1 text-xl font-bold text-slate-900">Línea de tiempo</h2></div><p className="text-sm text-slate-500">{timeline.length} registros · {tasks.length} tareas</p></div>
-      {loadingHistory ? <p className="mt-5 text-sm text-slate-500">Cargando historial…</p> : timeline.length === 0 ? <p className="mt-5 text-sm text-slate-500">Este cliente aún no tiene tareas ni registros de tiempo.</p> : <ol className="mt-5 divide-y divide-slate-100">{timeline.map((event) => <li key={event.id} className="py-4 first:pt-0 last:pb-0"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{event.task.title}</h3><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${event.type === 'time' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-700'}`}>{event.type === 'time' ? 'Registro de tiempo' : `Tarea · ${statusLabel(event.task.status)}`}</span></div><p className="mt-1 text-sm text-slate-500">{formatDate(event.date)} · Contador: {event.actorName}</p></div>{event.entry && <span className="font-semibold text-slate-800">{formatMinutes(event.entry.duration_minutes)}</span>}</div>
+    {selectedClient && <section className="rounded-2xl bg-white p-5 shadow-sm sm:p-7"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold uppercase tracking-wider text-slate-400">Actividad del cliente</p><h2 className="mt-1 text-xl font-bold text-slate-900">Línea de tiempo</h2></div><p className="text-sm text-slate-500">{filteredTimelineEvents.length} registros</p></div>
+      
+      {/* Filtro de calendario por periodo */}
+      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs sm:text-sm">
+        <span className="font-semibold text-slate-700">Filtrar por periodo:</span>
+        <label className="flex items-center gap-1 font-medium text-slate-600">Desde: <input type="date" value={timelineStartDate} onChange={(e) => setTimelineStartDate(e.target.value)} className="rounded border border-slate-300 bg-white p-1 text-slate-800" /></label>
+        <label className="flex items-center gap-1 font-medium text-slate-600">Hasta: <input type="date" value={timelineEndDate} onChange={(e) => setTimelineEndDate(e.target.value)} className="rounded border border-slate-300 bg-white p-1 text-slate-800" /></label>
+        {(timelineStartDate || timelineEndDate) && (
+          <button type="button" onClick={() => { setTimelineStartDate(''); setTimelineEndDate(''); }} className="rounded bg-slate-200 px-2.5 py-1 font-semibold text-slate-700 hover:bg-slate-300">Limpiar filtros</button>
+        )}
+      </div>
+
+      {loadingHistory ? <p className="mt-5 text-sm text-slate-500">Cargando historial…</p> : filteredTimelineEvents.length === 0 ? <p className="mt-5 text-sm text-slate-500">No hay tareas ni registros de tiempo en este periodo seleccionado.</p> : <ol className="mt-5 divide-y divide-slate-100">{filteredTimelineEvents.map((event) => <li key={event.id} className="py-4 first:pt-0 last:pb-0"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{event.task.title}</h3><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${event.type === 'time' ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-700'}`}>{event.type === 'time' ? 'Registro de tiempo' : `Tarea · ${statusLabel(event.task.status)}`}</span></div><p className="mt-1 text-sm text-slate-500">{formatDate(event.date)} · Contador: {event.actorName}</p></div>{event.entry && <span className="font-semibold text-slate-800">{formatMinutes(event.entry.duration_minutes)}</span>}</div>
         {event.entry && <p className="mt-2 text-sm text-slate-600">{event.entry.is_manual ? 'Entrada manual' : 'Cronómetro'}{event.entry.justification ? ` · Justificación: ${event.entry.justification}` : ''}</p>}
       </li>)}</ol>}
     </section>}
@@ -334,6 +370,7 @@ export default function ClientHistory() {
       {['postal_code','street','exterior_number','interior_number','neighborhood','city','state'].map((field) => <label key={field} className="text-sm font-medium">{{postal_code:'C.P.',street:'Calle',exterior_number:'No. exterior',interior_number:'No. interior',neighborhood:'Colonia',city:'Ciudad',state:'Estado'}[field]}<input value={clientFields[field] ?? ''} onChange={(e) => setClientFields({...clientFields,[field]:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5" /></label>)}
       <label className="text-sm font-medium">¿Tiene trabajadores?<select value={clientFields.has_employees ?? ''} onChange={(e) => setClientFields({...clientFields,has_employees:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">Selecciona</option><option value="true">Sí</option><option value="false">No</option></select></label><label className="text-sm font-medium">Tipo de nómina<select value={clientFields.payroll_frequency ?? ''} onChange={(e) => setClientFields({...clientFields,payroll_frequency:e.target.value})} className="mt-1 w-full rounded-lg border p-2.5"><option value="">No aplica</option><option value="WEEKLY">Semanal</option><option value="BIWEEKLY">Quincenal</option><option value="MONTHLY">Mensual</option></select></label>
       <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2">{[['primary_contact','Contacto principal'],['payment_contact','Contacto de pagos']].map(([prefix,label]) => <fieldset key={prefix} className="grid gap-2 rounded-lg border p-3 sm:grid-cols-2"><legend className="px-1 text-sm font-semibold">{label}</legend>{[['name','Nombre'],['phone','Teléfono'],['email','Correo'],['title','Cargo']].map(([suffix,caption]) => {const key=`${prefix}_${suffix}`; return <label key={key} className="text-xs font-medium">{caption}<input type={suffix==='email'?'email':'text'} value={clientFields[key] ?? ''} onChange={(e) => setClientFields({...clientFields,[key]:e.target.value})} className="mt-1 w-full rounded border p-2" /></label>;})}</fieldset>)}</div>
-      {error && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{error}</p>}<div className="flex justify-end gap-3 pt-2 sm:col-span-2"><button type="button" disabled={savingClient} onClick={() => setShowClientForm(false)} className="rounded-lg border px-4 py-2.5">Cancelar</button><button type="submit" disabled={savingClient} className="rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white">{savingClient ? 'Guardando…' : 'Guardar cliente'}</button></div></form></section></div>}
+      {error && <p role="alert" className="text-sm text-red-700 sm:col-span-2">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2 sm:col-span-2"><button type="button" onClick={() => setShowClientForm(false)} disabled={savingClient} className="rounded-lg border px-4 py-2 text-sm font-semibold hover:bg-slate-50">Cancelar</button><button type="submit" disabled={savingClient} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">{savingClient ? 'Guardando…' : 'Guardar cliente'}</button></div></form></section></div>}
   </div>;
 }
