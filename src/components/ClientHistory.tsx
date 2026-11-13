@@ -5,7 +5,7 @@ import { useFormDraft } from '../hooks/useFormDraft';
 import { logActivity } from '../lib/activityLogs';
 import { REGIMENES_SAT, regimenSatLabel, type TipoPersona } from '../constants/regimenesSat';
 
-type Client = { id: string; name: string; tax_id: string | null; tax_regime?: string | string[] | null; tax_regimes?: string[] | null; contact_email: string | null; phone: string | null; [key: string]: any };
+type Client = { id: string; name: string; tax_id: string | null; person_type?: string | null; tax_regime?: string | string[] | null; tax_regimes?: string[] | null; obligations?: unknown[] | null; contact_email: string | null; phone: string | null; [key: string]: any };
 type Project = { id: string; client_id: string; name: string };
 type Task = { id: string; title: string; status: string; project_id: string; assigned_to: string | null; created_at: string; due_date: string | null };
 type TimeEntry = { id: string; client_id?: string; task_id: string; user_id: string; start_time: string | null; created_at: string; duration_minutes: number; is_manual: boolean; justification: string | null };
@@ -55,6 +55,13 @@ function parseTaxRegimes(value: unknown): string[] {
 
 function formatTaxRegime(value: unknown) {
   return parseTaxRegimes(value).join(', ') || 'No registrado';
+}
+
+function formatPersonType(value: unknown) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (['PHYSICAL', 'FISICA', 'FÍSICA'].includes(normalized)) return 'Física';
+  if (normalized === 'MORAL') return 'Moral';
+  return String(value ?? '') || 'No registrado';
 }
 
 export default function ClientHistory() {
@@ -165,6 +172,7 @@ export default function ClientHistory() {
     event.preventDefault();
     if (savingClient) return;
     setSavingClient(true); setError(null); setNotice(null);
+    try {
     const hasEmployees = clientFields.has_employees === 'true';
     const giro = clientFields.industry ?? '';
     const clientData = {
@@ -177,6 +185,8 @@ export default function ClientHistory() {
       industry: giro,
       line_of_business: giro,
       phone: phone.trim(),
+      // `clients` uses `tax_id` for the RFC throughout the existing app.
+      tax_id: taxId.trim().toUpperCase() || null,
       tax_regime: taxRegime ? [taxRegime] : [],
       obligations: obligaciones.map((id) => {
         const obligation = regimenSeleccionado?.obligaciones.find((item) => item.id === id);
@@ -205,8 +215,11 @@ export default function ClientHistory() {
     const result = editingClient
       ? await supabase.from('clients').update(clientData).eq('id', editingClient.id)
       : await supabase.from('clients').insert(clientData);
-    setSavingClient(false);
-    if (result.error) { setError(`No se pudo guardar el cliente: ${result.error.message}`); return; }
+    if (result.error) {
+      console.error('Error de Supabase al guardar cliente:', result.error, { submittedColumns: Object.keys(clientData) });
+      setError(`No se pudo guardar el cliente: ${result.error.message}`);
+      return;
+    }
     if (!editingClient) await logActivity(user?.id, 'client_created', `Creó el cliente: ${clientName.trim()}`);
     clearClientDraft();
     setSelectedId(editingClient?.id ?? '');
@@ -214,6 +227,12 @@ export default function ClientHistory() {
     setShowClientForm(false);
     setNotice(editingClient ? 'Cliente actualizado.' : 'Cliente creado.');
     setRefreshKey((value) => value + 1);
+    } catch (saveError) {
+      console.error('Error inesperado al guardar cliente:', saveError);
+      setError(`No se pudo guardar el cliente: ${saveError instanceof Error ? saveError.message : String(saveError)}`);
+    } finally {
+      setSavingClient(false);
+    }
   }
 
   useEffect(() => {
@@ -295,7 +314,7 @@ export default function ClientHistory() {
         </div>
         {selectedClient ? <div className="rounded-xl border border-slate-200 p-4 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Información general</p><h3 className="mt-1 text-xl font-bold text-slate-900">{selectedClient.name}</h3></div><div className="flex items-center gap-2"><span className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{formatMinutes(totalMinutes)} acumuladas</span>{canManageClients && <button type="button" onClick={() => openClientForm(selectedClient)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Editar cliente</button>}</div></div>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">RFC</dt><dd className="font-medium text-slate-800">{selectedClient.tax_id || 'No registrado'}</dd></div><div><dt className="text-slate-500">Régimen fiscal</dt><dd className="font-medium text-slate-800">{formatTaxRegime(selectedClient.tax_regime ?? selectedClient.tax_regimes)}</dd></div><div><dt className="text-slate-500">Email de contacto</dt><dd className="font-medium text-slate-800">{selectedClient.contact_email || 'No registrado'}</dd></div><div><dt className="text-slate-500">Teléfono</dt><dd className="font-medium text-slate-800">{selectedClient.phone || 'No registrado'}</dd></div></dl>
-          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">{[['Giro',selectedClient.industry],['Tipo de persona',selectedClient.person_type],['Forma de pago',selectedClient.payment_method],['Contador asignado',accountants.find((person) => person.id === selectedClient.assigned_accountant_id)?.full_name],['Domicilio', [selectedClient.street,selectedClient.exterior_number,selectedClient.interior_number,selectedClient.neighborhood,selectedClient.postal_code,selectedClient.city,selectedClient.state].filter(Boolean).join(', ')],['Nómina',selectedClient.has_employees ? `Sí \u00b7 ${selectedClient.payroll_frequency ?? ''}` : selectedClient.has_employees === false ? 'Sin trabajadores' : null],['Contacto principal', [selectedClient.primary_contact_name,selectedClient.primary_contact_title,selectedClient.primary_contact_phone,selectedClient.primary_contact_email].filter(Boolean).join(' \u00b7 ')],['Contacto de pagos', [selectedClient.payment_contact_name,selectedClient.payment_contact_title,selectedClient.payment_contact_phone,selectedClient.payment_contact_email].filter(Boolean).join(' \u00b7 ') ]].map(([label,value]) => <div key={String(label)}><dt className="text-slate-500">{label}</dt><dd className="font-medium text-slate-800">{value || 'No registrado'}</dd></div>)}</dl>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">{[['Giro',selectedClient.industry],['Tipo de persona',formatPersonType(selectedClient.person_type ?? selectedClient.tipo_persona)],['Forma de pago',selectedClient.payment_method],['Contador asignado',accountants.find((person) => person.id === selectedClient.assigned_accountant_id)?.full_name],['Domicilio', [selectedClient.street,selectedClient.exterior_number,selectedClient.interior_number,selectedClient.neighborhood,selectedClient.postal_code,selectedClient.city,selectedClient.state].filter(Boolean).join(', ')],['Nómina',selectedClient.has_employees ? `Sí \u00b7 ${selectedClient.payroll_frequency ?? ''}` : selectedClient.has_employees === false ? 'Sin trabajadores' : null],['Contacto principal', [selectedClient.primary_contact_name,selectedClient.primary_contact_title,selectedClient.primary_contact_phone,selectedClient.primary_contact_email].filter(Boolean).join(' \u00b7 ')],['Contacto de pagos', [selectedClient.payment_contact_name,selectedClient.payment_contact_title,selectedClient.payment_contact_phone,selectedClient.payment_contact_email].filter(Boolean).join(' \u00b7 ') ]].map(([label,value]) => <div key={String(label)}><dt className="text-slate-500">{label}</dt><dd className="font-medium text-slate-800">{value || 'No registrado'}</dd></div>)}</dl>
         </div> : <div className="flex items-center justify-center rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">{loadingClients ? 'Cargando expediente…' : 'Selecciona un cliente para abrir su expediente.'}</div>}
       </div>
     </section>
