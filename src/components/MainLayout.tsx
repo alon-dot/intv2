@@ -10,6 +10,7 @@ import UserManagement from './UserManagement';
 import ActivityHistory from './ActivityHistory';
 import AdminDashboard from './AdminDashboard'; // Supervisión de tareas original
 import AdminMetrics from './AdminMetrics'; // Nuevo módulo exclusivo de métricas y gráficas
+import FiscalCalendar from './FiscalCalendar';
 
 const tabTitles: Record<TabId, string> = {
   users: 'Gestión de usuarios',
@@ -20,6 +21,7 @@ const tabTitles: Record<TabId, string> = {
   history: 'Historial',
   workload: 'Asignación de Carga de Trabajo',
   metrics: 'Rendimiento y Métricas',
+  fiscal: 'Agenda Fiscal',
 };
 
 function normalizeRole(role: string | null): UserRole | null {
@@ -62,6 +64,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           <div className={activeTab === 'time' ? '' : 'hidden'}><TimeTracker /></div>
           {activeTab === 'workload' && isManager && <WorkloadManagement />}
           {activeTab === 'clients' && <ClientHistory />}
+          {activeTab === 'fiscal' && <FiscalCalendar />}
           {activeTab === 'history' && <ActivityHistory />}
           {activeTab === 'users' && userRole === 'ADMIN' && <UserManagement />}
           
