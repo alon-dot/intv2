@@ -13,6 +13,7 @@ type TimeEntrySummary = {
 type ClientData = {
   id: string;
   name: string;
+  assigned_accountant_id?: string;
 };
 
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -29,12 +30,20 @@ export default function AdminMetrics() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
+  // Estados para filtros específicos (Múltiples selecciones mediante IDs)
+  const [selectedClients, setSelectedClients] = useState<string[]>([]);
+  const [selectedAccountants, setSelectedAccountants] = useState<string[]>([]);
+  const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([]);
+
+  // Estados para colapsar/expandir los paneles de filtros avanzados
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+
   const load = useCallback(async () => {
     const [profileResult, taskResult, entryResult, clientResult] = await Promise.all([
-      supabase.from('profiles').select('id,full_name,role').order('full_name'),
+      supabase.from('profiles').select('id,full_name,role,supervisor_id').order('full_name'),
       supabase.from('tasks').select('*').order('created_at', { ascending: false }),
       supabase.from('time_entries').select('duration_minutes,client_id,user_id,created_at,start_time'),
-      supabase.from('clients').select('id,name'),
+      supabase.from('clients').select('id,name,assigned_accountant_id'),
     ]);
 
     setProfiles(profileResult.data ?? []);
@@ -54,8 +63,28 @@ export default function AdminMetrics() {
   useEffect(() => { void load(); }, [load]);
 
   const clientNamesMap = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c.name])), [clients]);
+  
+  const accountants = useMemo(() => profiles.filter(p => p.role === 'contador'), [profiles]);
+  const supervisors = useMemo(() => profiles.filter(p => p.role === 'supervisor' || p.role === 'admin'), [profiles]);
 
-  // Fecha actual con formato estilizado para el reporte
+  const profileMap = useMemo(() => Object.fromEntries(profiles.map(p => [p.id, p])), [profiles]);
+
+  // Textos para el reporte PDF
+  const selectedClientNames = useMemo(() => {
+    if (selectedClients.length === 0) return 'Todos los clientes (Cartera General)';
+    return selectedClients.map(id => clientNamesMap[id]).filter(Boolean).join(', ');
+  }, [selectedClients, clientNamesMap]);
+
+  const selectedAccountantNames = useMemo(() => {
+    if (selectedAccountants.length === 0) return 'Todos los contadores';
+    return selectedAccountants.map(id => profileMap[id]?.full_name || profileMap[id]?.email).filter(Boolean).join(', ');
+  }, [selectedAccountants, profileMap]);
+
+  const selectedSupervisorNames = useMemo(() => {
+    if (selectedSupervisors.length === 0) return 'Todos los supervisores';
+    return selectedSupervisors.map(id => profileMap[id]?.full_name || profileMap[id]?.email).filter(Boolean).join(', ');
+  }, [selectedSupervisors, profileMap]);
+
   const formattedReportDate = useMemo(() => {
     return new Date().toLocaleDateString('es-MX', {
       weekday: 'long',
@@ -67,12 +96,28 @@ export default function AdminMetrics() {
     });
   }, []);
 
-  // 1. Filtrado dinámico de tareas según el rango seleccionado
+  // 1. Filtrado dinámico de tareas
   const filteredTasks = useMemo(() => {
-    if (filterMode === 'all') return tasks;
-    
     const now = new Date();
     return tasks.filter((task) => {
+      if (selectedClients.length > 0) {
+        if (!task.client_id || !selectedClients.includes(task.client_id)) return false;
+      }
+
+      if (selectedAccountants.length > 0) {
+        if (!task.assigned_to || !selectedAccountants.includes(task.assigned_to)) return false;
+      }
+
+      if (selectedSupervisors.length > 0) {
+        const assignedUser = task.assigned_to ? profileMap[task.assigned_to] : null;
+        const supervisorId = assignedUser?.supervisor_id;
+        const isCreatedBySupervisor = task.created_by && selectedSupervisors.includes(task.created_by);
+        const isAssignedSupervisor = supervisorId && selectedSupervisors.includes(supervisorId);
+        
+        if (!isCreatedBySupervisor && !isAssignedSupervisor) return false;
+      }
+
+      if (filterMode === 'all') return true;
       const taskDate = new Date(task.created_at);
       if (isNaN(taskDate.getTime())) return true;
 
@@ -94,14 +139,28 @@ export default function AdminMetrics() {
       }
       return true;
     });
-  }, [tasks, filterMode, startDate, endDate]);
+  }, [tasks, filterMode, startDate, endDate, selectedClients, selectedAccountants, selectedSupervisors, profileMap]);
 
   // 2. Filtrado dinámico de registros de tiempo
   const filteredEntries = useMemo(() => {
-    if (filterMode === 'all') return entries;
-
     const now = new Date();
     return entries.filter((entry) => {
+      if (selectedClients.length > 0) {
+        if (!entry.client_id || !selectedClients.includes(entry.client_id)) return false;
+      }
+
+      if (selectedAccountants.length > 0) {
+        if (!entry.user_id || !selectedAccountants.includes(entry.user_id)) return false;
+      }
+
+      if (selectedSupervisors.length > 0) {
+        const entryUser = entry.user_id ? profileMap[entry.user_id] : null;
+        const supervisorId = entryUser?.supervisor_id;
+        if (!supervisorId || !selectedSupervisors.includes(supervisorId)) return false;
+      }
+
+      if (filterMode === 'all') return true;
+
       const rawDate = entry.start_time || entry.created_at;
       if (!rawDate) return false;
 
@@ -126,9 +185,8 @@ export default function AdminMetrics() {
       }
       return true;
     });
-  }, [entries, filterMode, startDate, endDate]);
+  }, [entries, filterMode, startDate, endDate, selectedClients, selectedAccountants, selectedSupervisors, profileMap]);
 
-  // Cálculos desglosados basados en los datos filtrados
   const totalTasks = filteredTasks.length;
   const completedTasks = filteredTasks.filter((task) => {
     const st = String(task.status).toLowerCase();
@@ -153,7 +211,6 @@ export default function AdminMetrics() {
   const totalMinutes = filteredEntries.reduce((sum, entry) => sum + (Number(entry.duration_minutes) || 0), 0);
   const totalHours = (totalMinutes / 60).toFixed(1);
 
-  // Agrupación de tiempo por cliente para analítica de rentabilidad (Top 3)
   const hoursPerClient = useMemo(() => {
     const map: Record<string, number> = {};
     filteredEntries.forEach((e) => {
@@ -177,14 +234,20 @@ export default function AdminMetrics() {
     return max === 0 ? 1 : max;
   }, [hoursPerClient]);
 
-  // Función para exportar reporte en PDF
+  const toggleSelection = (id: string, list: string[], setList: (val: string[]) => void) => {
+    if (list.includes(id)) {
+      setList(list.filter(item => item !== id));
+    } else {
+      setList([...list, id]);
+    }
+  };
+
   const handleExportPDF = () => {
     window.print();
   };
 
   return (
     <DashboardShell title="Rendimiento y Métricas">
-      {/* Estilos CSS avanzados para impresión: Zoom exacto (0.73) para una sola hoja limpia */}
       <style>{`
         @media print {
           @page {
@@ -202,12 +265,18 @@ export default function AdminMetrics() {
             display: none !important;
           }
           .print-header {
-            display: flex !important;
-            align-items: center;
-            justify-content: space-between;
+            display: block !important;
             border-bottom: 2px solid #0f172a;
-            padding-bottom: 6px;
-            margin-bottom: 10px;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+          }
+          .print-meta-box {
+            background-color: #f8fafc !important;
+            border: 1px solid #cbd5e1 !important;
+            padding: 8px 12px !important;
+            border-radius: 6px;
+            margin-top: 8px;
+            font-size: 10px;
           }
           .rounded-2xl, .rounded-xl {
             border: 1px solid #cbd5e1 !important;
@@ -227,17 +296,32 @@ export default function AdminMetrics() {
         }
       `}</style>
 
-      {/* Encabezado exclusivo para el PDF con el logo azul institucional correcto */}
+      {/* Encabezado y Ficha de Datos del Reporte PDF en 3 columnas sin checkboxes */}
       <div className="print-header">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-base font-bold text-slate-900 leading-tight">Téllez Ponce & Asociados</h1>
-            <p className="text-[11px] text-slate-500">Reporte Ejecutivo de Rendimiento y Operación</p>
+            <p className="text-[11px] text-slate-600 font-medium">Reporte Ejecutivo de Rendimiento, Operación y Supervisión</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-semibold text-slate-800 capitalize">{formattedReportDate}</p>
+            <p className="text-[10px] text-slate-500">Sistema de Control Interno</p>
           </div>
         </div>
-        <div className="text-right">
-          <p className="text-xs font-semibold text-slate-700 capitalize">{formattedReportDate}</p>
-          <p className="text-[10px] text-slate-400">Sistema de Control Interno</p>
+
+        <div className="print-meta-box grid grid-cols-3 gap-3 text-slate-700 text-[10px]">
+          <div>
+            <strong className="text-slate-900 uppercase block mb-0.5">Clientes:</strong>
+            <span>{selectedClientNames}</span>
+          </div>
+          <div>
+            <strong className="text-slate-900 uppercase block mb-0.5">Contadores:</strong>
+            <span>{selectedAccountantNames}</span>
+          </div>
+          <div>
+            <strong className="text-slate-900 uppercase block mb-0.5">Supervisores:</strong>
+            <span>{selectedSupervisorNames}</span>
+          </div>
         </div>
       </div>
 
@@ -247,7 +331,7 @@ export default function AdminMetrics() {
       <div className="no-print mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
         <div>
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">Filtrar métricas y rendimiento</h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400">Selecciona un rango de tiempo para auditar la operación del despacho.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Selecciona rangos de tiempo y segmenta por clientes, contadores o supervisores.</p>
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
@@ -277,7 +361,101 @@ export default function AdminMetrics() {
         )}
       </div>
 
-      {/* Tarjetas de KPIs Estratégicos */}
+      {/* Panel Desplegable de Filtros Avanzados por Checkbox */}
+      <div className="no-print mb-6 rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
+        <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>Filtros Específicos (Clientes, Contadores y Supervisores)</span>
+              {(selectedClients.length > 0 || selectedAccountants.length > 0 || selectedSupervisors.length > 0) && (
+                <span className="bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 text-[10px] px-2 py-0.5 rounded-full font-semibold">
+                  Activos ({selectedClients.length + selectedAccountants.length + selectedSupervisors.length})
+                </span>
+              )}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Selecciona contadores, supervisores y clientes para desglosar la información.</p>
+          </div>
+          <button type="button" className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+            {showAdvancedFilters ? 'Ocultar filtros ▲' : 'Mostrar filtros ▼'}
+          </button>
+        </div>
+
+        {showAdvancedFilters && (
+          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 grid gap-6 md:grid-cols-3">
+            
+            {/* Clientes */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Clientes</span>
+                {selectedClients.length > 0 && (
+                  <button onClick={() => setSelectedClients([])} className="text-[10px] text-blue-500 hover:underline">Limpiar</button>
+                )}
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2 bg-slate-50 dark:bg-slate-800/30">
+                {clients.map(client => (
+                  <label key={client.id} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer hover:text-slate-900">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedClients.includes(client.id)}
+                      onChange={() => toggleSelection(client.id, selectedClients, setSelectedClients)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                    />
+                    <span className="truncate">{client.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Contadores */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Contadores</span>
+                {selectedAccountants.length > 0 && (
+                  <button onClick={() => setSelectedAccountants([])} className="text-[10px] text-blue-500 hover:underline">Limpiar</button>
+                )}
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2 bg-slate-50 dark:bg-slate-800/30">
+                {accountants.map(acc => (
+                  <label key={acc.id} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer hover:text-slate-900">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedAccountants.includes(acc.id)}
+                      onChange={() => toggleSelection(acc.id, selectedAccountants, setSelectedAccountants)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                    />
+                    <span className="truncate">{acc.full_name || acc.email}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Supervisores */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Supervisores</span>
+                {selectedSupervisors.length > 0 && (
+                  <button onClick={() => setSelectedSupervisors([])} className="text-[10px] text-blue-500 hover:underline">Limpiar</button>
+                )}
+              </div>
+              <div className="max-h-40 overflow-y-auto space-y-1.5 pr-2 border border-slate-100 dark:border-slate-800 rounded-lg p-2 bg-slate-50 dark:bg-slate-800/30">
+                {supervisors.map(sup => (
+                  <label key={sup.id} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer hover:text-slate-900">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedSupervisors.includes(sup.id)}
+                      onChange={() => toggleSelection(sup.id, selectedSupervisors, setSelectedSupervisors)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                    />
+                    <span className="truncate">{sup.full_name || sup.email}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Tiempo Invertido</p>
@@ -285,7 +463,7 @@ export default function AdminMetrics() {
         </div>
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Cartera de Clientes</p>
-          <p className="mt-2 text-2xl font-bold text-blue-600 dark:text-blue-400">{clients.length} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">cuentas</span></p>
+          <p className="mt-2 text-2xl font-bold text-blue-600 dark:text-blue-400">{selectedClients.length > 0 ? selectedClients.length : clients.length} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">cuentas</span></p>
         </div>
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Completadas</p>
@@ -305,14 +483,11 @@ export default function AdminMetrics() {
         </div>
       </div>
 
-      {/* Gráficas Simétricas Principales */}
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        
-        {/* Gráfica de Barras 1: Distribución Operativa de Tareas */}
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-colors">
           <div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Gráfica de Carga de Tareas</h3>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Volumen de actividades por estatus operativo.</p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Volumen de actividades por estatus operativo según filtros aplicados.</p>
           </div>
           
           <div className="my-4 flex items-end justify-around h-36 px-2 pt-6 border-b border-l border-slate-200 dark:border-slate-800 relative">
@@ -322,7 +497,6 @@ export default function AdminMetrics() {
               <span>0</span>
             </div>
 
-            {/* Completadas */}
             <div className="flex flex-col items-center gap-2 flex-1 max-w-[60px] h-full justify-end">
               <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{completedTasks}</span>
               <div 
@@ -332,7 +506,6 @@ export default function AdminMetrics() {
               <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300 text-center truncate w-full">Completadas</span>
             </div>
 
-            {/* En Proceso */}
             <div className="flex flex-col items-center gap-2 flex-1 max-w-[60px] h-full justify-end">
               <span className="text-xs font-bold text-blue-500 dark:text-blue-400">{inProgressTasks}</span>
               <div 
@@ -342,7 +515,6 @@ export default function AdminMetrics() {
               <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300 text-center truncate w-full">En Proceso</span>
             </div>
 
-            {/* En Revisión */}
             <div className="flex flex-col items-center gap-2 flex-1 max-w-[60px] h-full justify-end">
               <span className="text-xs font-bold text-purple-600 dark:text-purple-400">{inReviewTasks}</span>
               <div 
@@ -352,7 +524,6 @@ export default function AdminMetrics() {
               <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300 text-center truncate w-full">En Revisión</span>
             </div>
 
-            {/* Pendientes */}
             <div className="flex flex-col items-center gap-2 flex-1 max-w-[60px] h-full justify-end">
               <span className="text-xs font-bold text-amber-500 dark:text-amber-400">{pendingTasks}</span>
               <div 
@@ -362,11 +533,9 @@ export default function AdminMetrics() {
               <span className="text-[10px] font-medium text-slate-600 dark:text-slate-300 text-center truncate w-full">Pendientes</span>
             </div>
           </div>
-
           <p className="text-[11px] text-slate-400 italic">Representación gráfica de volúmenes de trabajo en el periodo.</p>
         </div>
 
-        {/* Gráfica de Barras 2: Analítica de Costo por Cliente (Top 3) */}
         <div className="rounded-2xl bg-white dark:bg-slate-900 p-6 shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col justify-between transition-colors">
           <div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Analítica de Costo por Cliente (Top 3)</h3>
@@ -375,7 +544,7 @@ export default function AdminMetrics() {
 
           <div className="my-4 space-y-3">
             {hoursPerClient.length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">No hay registros de tiempo en este periodo.</p>
+              <p className="text-xs text-slate-400 py-6 text-center">No hay registros de tiempo en este periodo o filtro.</p>
             ) : (
               hoursPerClient.map((item, idx) => {
                 const barWidthPercentage = Math.round((item.hours / maxClientHours) * 100);
@@ -396,13 +565,10 @@ export default function AdminMetrics() {
               })
             )}
           </div>
-
           <p className="text-[11px] text-slate-400 italic">Evaluación de rentabilidad y consumo de recursos por cuenta.</p>
         </div>
-
       </div>
 
-      {/* Sección Inferior con los 4 indicadores operacionales completos */}
       <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-sm border border-slate-200 dark:border-slate-800 transition-colors">
         <h3 className="text-base font-bold text-slate-900 dark:text-white">Resumen de Eficiencia y Supervisión Fiscal</h3>
         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Indicadores globales desglosados sobre el estado de la operación del despacho en el periodo.</p>
@@ -419,25 +585,8 @@ export default function AdminMetrics() {
           <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
             <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">En Proceso</p>
             <p className="text-xl font-extrabold text-blue-500 dark:text-blue-400 mt-1.5">
-              {inProgressTasks} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">tareas</span>
+              {inProgressTasks}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Actividades en desarrollo activo.</p>
-          </div>
-
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">En Revisión</p>
-            <p className="text-xl font-extrabold text-purple-600 dark:text-purple-400 mt-1.5">
-              {inReviewTasks} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">tareas</span>
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Actividades listas para validación.</p>
-          </div>
-
-          <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-3.5 border border-slate-100 dark:border-slate-800">
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Pendientes</p>
-            <p className="text-xl font-extrabold text-amber-500 dark:text-amber-400 mt-1.5">
-              {pendingTasks} <span className="text-xs font-normal text-slate-500 dark:text-slate-400">tareas</span>
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Tareas por iniciar o sin atender.</p>
           </div>
         </div>
       </div>

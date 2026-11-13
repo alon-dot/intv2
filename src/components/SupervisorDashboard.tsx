@@ -14,29 +14,37 @@ export default function SupervisorDashboard() {
   const load = useCallback(async () => {
     if (!user) return;
     setError(null);
+    
+    // Filtramos los perfiles que pertenecen específicamente al supervisor logueado
     const { data: members, error: memberError } = await supabase
       .from('profiles')
       .select('id,full_name,role')
+      .eq('supervisor_id', user.id)
       .order('full_name');
+
     if (memberError) {
       setError(memberError.message);
       setTeam([]);
       setTasks([]);
       return;
     }
+    
     const accountants = (members ?? []).filter((member) =>
       ['contador', 'accountant'].includes(String(member.role).trim().toLowerCase()),
     );
     setTeam(accountants);
+    
     if (accountants.length === 0) {
       setTasks([]);
       return;
     }
+
     const { data, error: taskError } = await supabase
       .from('tasks')
       .select('*')
       .in('assigned_to', accountants.map((member) => member.id))
       .order('created_at', { ascending: false });
+      
     setTasks(data ?? []);
     setError(taskError?.message ?? null);
   }, [user]);
