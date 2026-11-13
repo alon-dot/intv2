@@ -18,8 +18,11 @@ export interface Profile {
 export interface Client {
   id: string;
   name: string;
+  /** RFC, stored in the existing `clients.tax_id` column. */
   tax_id?: string;
+  person_type?: 'PHYSICAL' | 'MORAL' | string;
   tax_regime?: string;
+  obligations?: Array<{ id: string; nombre: string; detalle: string | null }>;
   contact_email?: string;
   phone?: string;
   created_at: string;

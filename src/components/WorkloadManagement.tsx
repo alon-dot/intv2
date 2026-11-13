@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { useFormDraft } from '../hooks/useFormDraft';
 import { logActivity } from '../lib/activityLogs';
+import { PROYECTOS_OFICIALES } from '../constants/proyectosOficiales';
 
 type Profile = { id: string; full_name: string; role: string; supervisor_id: string | null };
 type Client = { id: string; name: string };
@@ -34,7 +35,6 @@ type Task = {
   priority?: string | null;
 };
 type OfficialProject = { key: string; name: string; number: string; projectId: string | null; subtasks: ProjectSubtask[] };
-type ProjectCatalogRow = { project_number: string | number | null; project_name: string | null };
 type TaskDetail = { task: Task; subtaskName: string | null };
 type AssignmentDraft = {
   assignmentType: 'official' | 'free'; projectKey: string; selectedSubtaskIds: string[];
@@ -44,23 +44,7 @@ type AssignmentDraft = {
 type TaskFilter = 'active' | 'today' | 'all';
 
 const labelForSubtask = (subtask: ProjectSubtask) => subtask.name ?? subtask.subtask_name ?? subtask.title ?? subtask.label ?? 'Subactividad';
-const projectNumbersWithVariables = new Set(['1', '2', '5', '6']);
-const fallbackProjectNames = [
-  'CONSTANCIA DE SITUACIÓN FISCAL Y 32-D',
-  'IMPUESTOS',
-  'NOMINA',
-  'FACTURACIÓN Y COMPLEMENTO DE PAGO',
-  'INFORMATIVAS',
-  'SEGURO SOCIAL',
-  'REGISTRO DE CONTABILIDAD',
-  'ESTADOS FINANCIEROS',
-  'PAPELES DE TRABAJO - DETERMINACION DE IMPUESTOS',
-  'CONTABILIDAD ELECTRÓNICA',
-  'ATENCIÓN DE FACULTADES DE COMPROBACIÓN',
-  'MEDIOS DE DEFENSA',
-  'ATENCIÓN A CLIENTE – REUNIÓN',
-];
-const fallbackProjectCatalog: ProjectCatalogRow[] = fallbackProjectNames.map((project_name, index) => ({ project_name, project_number: index + 1 }));
+const ITEMS_PER_PAGE = 5;
 const fieldClass = 'mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800';
 const inactiveTaskStatuses = new Set(['completed', 'completado', 'completada', 'cancelled', 'canceled', 'cancelado', 'cancelada', 'archived', 'archivado', 'archivada']);
 const taskIsActive = (task: Task) => !inactiveTaskStatuses.has(task.status.trim().toLowerCase());
@@ -71,9 +55,9 @@ export default function WorkloadManagement() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [projectRows, setProjectRows] = useState<ProjectSubtask[]>([]);
-  const [projectCatalog, setProjectCatalog] = useState<ProjectCatalogRow[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [taskFilter, setTaskFilter] = useState<TaskFilter>('active');
+  const [currentPage, setCurrentPage] = useState(1);
   const [todayKey, setTodayKey] = useState(() => localDateKey(new Date()));
   const [loading, setLoading] = useState(true);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
@@ -134,13 +118,12 @@ export default function WorkloadManagement() {
     const scopedProfileQuery = role === 'supervisor'
       ? profileQuery.or(`id.eq.${user.id},supervisor_id.eq.${user.id}`)
       : profileQuery;
-    const [profileResult, clientResult, projectCatalogResult, projectResult] = await Promise.all([
+    const [profileResult, clientResult, projectResult] = await Promise.all([
       scopedProfileQuery,
       supabase.from('clients').select('id,name').order('name'),
-      supabase.from('project_subtasks').select('project_number, project_name').order('project_number', { ascending: true }),
       supabase.from('project_subtasks').select('*'),
     ]);
-    const firstError = profileResult.error ?? clientResult.error ?? projectCatalogResult.error ?? projectResult.error;
+    const firstError = profileResult.error ?? clientResult.error ?? projectResult.error;
     if (firstError) setError(`No se pudo cargar toda la información de asignaciones: ${firstError.message}`);
     if (profileResult.error) {
       setProfiles([]);
@@ -165,12 +148,6 @@ export default function WorkloadManagement() {
     if (taskResult.error) setError(`No se pudieron cargar las tareas del equipo: ${taskResult.error.message}`);
     if (!clientResult.error) setClients((clientResult.data ?? []) as Client[]);
     if (!projectResult.error) setProjectRows((projectResult.data ?? []) as ProjectSubtask[]);
-    const uniqueProjects = new Map<string, ProjectCatalogRow>();
-    for (const row of (projectCatalogResult.data ?? []) as ProjectCatalogRow[]) {
-      const name = row.project_name?.trim();
-      if (name && !uniqueProjects.has(name.toLocaleLowerCase('es-MX'))) uniqueProjects.set(name.toLocaleLowerCase('es-MX'), { ...row, project_name: name });
-    }
-    if (!projectCatalogResult.error) setProjectCatalog(uniqueProjects.size === 0 ? fallbackProjectCatalog : [...uniqueProjects.values()]);
     if (!taskResult.error) setTasks((taskResult.data ?? []) as Task[]);
     setLoading(false);
   }, [role, user]);
@@ -219,25 +196,28 @@ export default function WorkloadManagement() {
     return map;
   }, [projectRows]);
   const subtaskNames = useMemo(() => Object.fromEntries(projectRows.map((row) => [row.id, labelForSubtask(row)])), [projectRows]);
-  const officialProjects = useMemo<OfficialProject[]>(() => {
-    return projectCatalog.map((catalogProject) => {
-      const number = String(catalogProject.project_number ?? '').trim();
-      const name = catalogProject.project_name?.trim() ?? `Proyecto ${number}`;
-      const matchingRows = projectRows.filter((row) =>
-        String(row.project_name ?? '').trim().toLocaleLowerCase('es-MX') === name.toLocaleLowerCase('es-MX')
-        || (number && String(row.project_number ?? '').trim() === number),
-      );
-      return {
-        key: `${number}::${name}`,
-        name,
-        number,
-        projectId: matchingRows.find((row) => row.project_id)?.project_id ?? null,
-        subtasks: matchingRows,
-      };
-    });
-  }, [projectCatalog, projectRows]);
+  const officialProjects = useMemo<OfficialProject[]>(() => PROYECTOS_OFICIALES.map((catalogProject) => {
+    const number = String(catalogProject.numero);
+    const name = catalogProject.nombre;
+    const matchingRows = projectRows.filter((row) =>
+      String(row.project_name ?? '').trim().toLocaleLowerCase('es-MX') === name.toLocaleLowerCase('es-MX')
+      || String(row.project_number ?? '').trim() === number,
+    );
+    return {
+      key: `${number}::${name}`,
+      name,
+      number,
+      projectId: matchingRows.find((row) => row.project_id)?.project_id ?? null,
+      subtasks: catalogProject.subactividades.map((subactivity, index) => ({
+        id: `${number}-${index + 1}`,
+        project_number: number,
+        project_name: name,
+        name: subactivity,
+      })),
+    };
+  }), [projectRows]);
   const selectedProject = officialProjects.find((project) => project.key === projectKey) ?? null;
-  const hasVariableSubtasks = Boolean(selectedProject && projectNumbersWithVariables.has(selectedProject.number));
+  const hasVariableSubtasks = Boolean(selectedProject?.subtasks.length);
   const visibleTasks = useMemo(() => {
     if (taskFilter === 'active') return tasks.filter(taskIsActive);
     if (taskFilter === 'all') return tasks;
@@ -247,6 +227,17 @@ export default function WorkloadManagement() {
       return createdDate === todayKey || scheduledDate === todayKey;
     });
   }, [taskFilter, tasks, todayKey]);
+  const totalPages = Math.max(1, Math.ceil(visibleTasks.length / ITEMS_PER_PAGE));
+  const pageStart = (Math.min(currentPage, totalPages) - 1) * ITEMS_PER_PAGE;
+  const paginatedTasks = visibleTasks.slice(pageStart, pageStart + ITEMS_PER_PAGE);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [taskFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
   const workloads = useMemo(() => {
     const workloadByAssignee = new Map<string, { count: number; hours: number }>();
     for (const task of visibleTasks) {
@@ -302,8 +293,12 @@ export default function WorkloadManagement() {
     if (!user || saving) return;
     setError(null);
     setNotice(null);
-    if (!clientId || !assigneeId || !priority) {
-      setError('Completa cliente, contador y prioridad.');
+    if (!assigneeId || !priority) {
+      setError('Completa contador y prioridad.');
+      return;
+    }
+    if (assignmentType === 'official' && !clientId) {
+      setError('Selecciona un cliente para el proyecto oficial.');
       return;
     }
     if (timeValidationError) {
@@ -351,7 +346,7 @@ export default function WorkloadManagement() {
     const taskData = {
       title: isProject ? selectedProjectName : title.trim(),
       description: isProject ? (notes.trim() || selectedProjectName) : description.trim(),
-      client_id: clientId,
+      client_id: clientId || null,
       assigned_to: assigneeId,
       created_by: user.id,
       due_date: dueDate,
@@ -398,7 +393,8 @@ export default function WorkloadManagement() {
   const formatDateTime = (value: string) => new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
 
   return <div className="mx-auto max-w-7xl space-y-6">
-    <section className="rounded-2xl bg-white p-5 shadow-sm sm:p-7">
+    <section className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+      <section className="min-w-0 rounded-2xl bg-white p-5 shadow-sm sm:p-7 lg:col-span-7">
       <p className="text-sm font-semibold uppercase tracking-wider text-blue-600">Administrador · Supervisor</p>
       <h2 className="mt-1 text-2xl font-bold text-slate-900">Asignación de carga de trabajo</h2>
       <p className="mt-1 text-sm text-slate-500">Asigna proyectos oficiales o tareas libres y consulta la carga activa del equipo.</p>
@@ -425,19 +421,17 @@ export default function WorkloadManagement() {
       {!loading && workloads.length === 0 && <p className="mt-5 text-sm text-slate-500">No hay contadores con tareas activas en este filtro.</p>}
       {loading ? <p className="mt-5 text-sm text-slate-500">Cargando equipo y asignaciones…</p> : <ul className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{workloads.map((member) => <li key={member.id} className="rounded-xl border border-slate-200 p-4"><h3 className="font-semibold text-slate-900">{member.full_name}</h3><p className="mt-1 text-sm text-slate-500">{member.count} {taskFilter === 'active' ? 'tareas activas' : 'tareas'} · {member.hours} h estimadas</p></li>)}</ul>}
     </section>
-
-    <section className="grid gap-6 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-      <form onSubmit={(event) => void createAssignment(event)} className="space-y-4 rounded-2xl bg-white p-5 shadow-sm sm:p-7">
+      <form onSubmit={(event) => void createAssignment(event)} className="space-y-4 rounded-2xl bg-white p-5 shadow-sm sm:p-7 lg:col-span-5">
         <h2 className="text-xl font-bold text-slate-900">Nueva asignación</h2>
         <label className="block text-sm font-medium text-slate-700">Tipo de asignación<select value={assignmentType} onChange={(event) => changeAssignmentType(event.target.value as 'official' | 'free')} className={fieldClass}><option value="official">Asignar proyecto oficial</option><option value="free">Asignar tarea libre</option></select></label>
         {assignmentType === 'official' ? <>
           <label className="block text-sm font-medium text-slate-700">Proyecto oficial<select required value={projectKey} onChange={(event) => { setProjectKey(event.target.value); setSelectedSubtaskIds([]); }} className={fieldClass}><option value="">Selecciona un proyecto</option>{officialProjects.map((project) => <option key={project.key} value={project.key}>{project.number ? `${project.number}. ` : ''}{project.name}</option>)}</select></label>
-          {hasVariableSubtasks && <fieldset className="rounded-xl border border-slate-200 p-3"><legend className="px-2 text-sm font-semibold text-slate-800">Variables / subactividades</legend>{selectedProject?.subtasks.length ? <div className="max-h-48 space-y-1 overflow-y-auto">{selectedProject.subtasks.map((subtask) => <label key={subtask.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-slate-50"><input type="checkbox" checked={selectedSubtaskIds.includes(subtask.id)} onChange={(event) => setSelectedSubtaskIds((current) => event.target.checked ? [...current, subtask.id] : current.filter((id) => id !== subtask.id))} className="rounded border-slate-300 text-blue-600" /><span>{labelForSubtask(subtask)}</span></label>)}</div> : <p className="px-2 py-1 text-sm text-amber-700">El catálogo de subactividades no está disponible; se asignará el proyecto sin variables.</p>}</fieldset>}
+          {hasVariableSubtasks && <fieldset className="rounded-xl border border-slate-200 p-3 dark:border-slate-700"><legend className="px-2 text-sm font-semibold text-slate-800 dark:text-slate-100">Variables / subactividades</legend><p className="px-2 pb-2 text-xs text-slate-500 dark:text-slate-400">Selecciona una o varias opciones.</p><div className="grid gap-1 sm:grid-cols-2">{selectedProject?.subtasks.map((subtask) => <label key={subtask.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"><input type="checkbox" checked={selectedSubtaskIds.includes(subtask.id)} onChange={(event) => setSelectedSubtaskIds((current) => event.target.checked ? [...new Set([...current, subtask.id])] : current.filter((id) => id !== subtask.id))} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800" /><span>{labelForSubtask(subtask)}</span></label>)}</div></fieldset>}
         </> : <>
           <label className="block text-sm font-medium text-slate-700">Título<input required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} className={fieldClass} /></label>
           <label className="block text-sm font-medium text-slate-700">Descripción detallada<textarea required rows={4} value={description} onChange={(event) => setDescription(event.target.value)} className={fieldClass} /></label>
         </>}
-        <label className="block text-sm font-medium text-slate-700">Cliente<select required value={clientId} onChange={(event) => setClientId(event.target.value)} className={fieldClass}><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
+        <label className="block text-sm font-medium text-slate-700">Cliente<select required={assignmentType === 'official'} value={clientId} onChange={(event) => setClientId(event.target.value)} className={fieldClass}><option value="">Selecciona un cliente</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></label>
         <label className="block text-sm font-medium text-slate-700">Contador responsable<select required value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} className={fieldClass}><option value="">Selecciona un contador</option>{accountants.map((accountant) => <option key={accountant.id} value={accountant.id}>{accountant.full_name}</option>)}</select></label>
         <label className="block text-sm font-medium text-slate-700">Categoría / semáforo<select required value={priority} onChange={(event) => setPriority(event.target.value as 'urgente' | 'media' | 'normal')} className={fieldClass}><option value="urgente">🔴 Urgente</option><option value="media">🟡 Prioridad media</option><option value="normal">🟢 Normal</option></select></label>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -454,13 +448,21 @@ export default function WorkloadManagement() {
         <label className="block text-sm font-medium text-slate-700">Notas (opcional)<textarea rows={2} value={notes} onChange={(event) => setNotes(event.target.value)} className={fieldClass} /></label>
         <button type="submit" disabled={saving || loading || !user} className="w-full rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">{saving ? 'Guardando…' : 'Crear y asignar'}</button>
       </form>
+    </section>
 
       <section className="min-w-0 rounded-2xl bg-white p-5 shadow-sm sm:p-7">
         <h2 className="text-xl font-bold text-slate-900">Registro histórico de asignaciones</h2>
         <p className="mt-1 text-sm text-slate-500">Fecha de creación y contador asignado de cada tarea.</p>
-        {loading ? <p className="mt-4 text-sm text-slate-500">Cargando historial…</p> : visibleTasks.length === 0 ? <p className="mt-4 text-sm text-slate-500">No hay tareas que coincidan con este filtro.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-2 py-3">Creado por</th><th className="px-2 py-3">Tipo / actividad</th><th className="px-2 py-3">Cliente</th><th className="px-2 py-3">Contador asignado</th><th className="px-2 py-3">Fecha y hora</th><th className="px-2 py-3">Acciones</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className="border-b border-slate-100 align-top"><td className="px-2 py-3">{task.created_by ? names[task.created_by] ?? 'Usuario' : '—'}</td><td className="max-w-64 px-2 py-3"><span className="block truncate font-medium text-slate-800">{task.project_id ? projectNames.get(task.project_id) ?? task.title : task.title}</span>{task.subtasks?.length ? <span className="text-xs text-slate-500">{task.subtasks.join(', ')}</span> : task.project_subtask_id && <span className="text-xs text-slate-500">{subtaskNames[task.project_subtask_id] ?? ''}</span>}</td><td className="px-2 py-3">{task.client_id ? clientNames[task.client_id] ?? 'Cliente' : '—'}</td><td className="px-2 py-3">{task.assigned_to ? names[task.assigned_to] ?? 'Usuario' : 'Sin asignar'}</td><td className="whitespace-nowrap px-2 py-3">{task.created_at ? formatDateTime(task.created_at) : '—'}</td><td className="px-2 py-3"><div className="flex flex-col gap-2"><button type="button" onClick={() => setDetail({ task, subtaskName: task.subtasks?.join(', ') || (task.project_subtask_id ? subtaskNames[task.project_subtask_id] ?? null : null) })} className="text-left font-medium text-blue-700 hover:underline">Ver detalles</button><select aria-label={`Reasignar ${task.title}`} value={task.assigned_to ?? ''} disabled={saving} onChange={(event) => void reassign(task, event.target.value)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"><option value="" disabled>Reasignar a…</option>{accountants.map((accountant) => <option key={accountant.id} value={accountant.id}>{accountant.full_name}</option>)}</select></div></td></tr>)}</tbody></table></div>}
+        {loading ? <p className="mt-4 text-sm text-slate-500">Cargando historial…</p> : visibleTasks.length === 0 ? <p className="mt-4 text-sm text-slate-500">No hay tareas que coincidan con este filtro.</p> : <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] border-collapse text-left text-sm"><thead><tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500"><th className="px-2 py-3">Creado por</th><th className="px-2 py-3">Tipo / actividad</th><th className="px-2 py-3">Cliente</th><th className="px-2 py-3">Contador asignado</th><th className="px-2 py-3">Fecha y hora</th><th className="px-2 py-3">Acciones</th></tr></thead><tbody>{paginatedTasks.map((task) => <tr key={task.id} className="border-b border-slate-100 align-top"><td className="px-2 py-3">{task.created_by ? names[task.created_by] ?? 'Usuario' : '—'}</td><td className="max-w-64 px-2 py-3"><span className="block truncate font-medium text-slate-800">{task.project_id ? projectNames.get(task.project_id) ?? task.title : task.title}</span>{task.subtasks?.length ? <span className="text-xs text-slate-500">{task.subtasks.join(', ')}</span> : task.project_subtask_id && <span className="text-xs text-slate-500">{subtaskNames[task.project_subtask_id] ?? ''}</span>}</td><td className="px-2 py-3">{task.client_id ? clientNames[task.client_id] ?? 'Cliente' : '—'}</td><td className="px-2 py-3">{task.assigned_to ? names[task.assigned_to] ?? 'Usuario' : 'Sin asignar'}</td><td className="whitespace-nowrap px-2 py-3">{task.created_at ? formatDateTime(task.created_at) : '—'}</td><td className="px-2 py-3"><div className="flex flex-col gap-2"><button type="button" onClick={() => setDetail({ task, subtaskName: task.subtasks?.join(', ') || (task.project_subtask_id ? subtaskNames[task.project_subtask_id] ?? null : null) })} className="text-left font-medium text-blue-700 hover:underline">Ver detalles</button><select aria-label={`Reasignar ${task.title}`} value={task.assigned_to ?? ''} disabled={saving} onChange={(event) => void reassign(task, event.target.value)} className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"><option value="" disabled>Reasignar a…</option>{accountants.map((accountant) => <option key={accountant.id} value={accountant.id}>{accountant.full_name}</option>)}</select></div></td></tr>)}</tbody></table></div>}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+          <p>{visibleTasks.length === 0 ? 'Mostrando 0–0 de 0 registros' : `Mostrando ${pageStart + 1}–${Math.min(pageStart + paginatedTasks.length, visibleTasks.length)} de ${visibleTasks.length} registros`}</p>
+          <div className="flex items-center gap-2">
+            <span className="px-2">Página {Math.min(currentPage, totalPages)} de {totalPages}</span>
+            <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage <= 1 || visibleTasks.length === 0} className="rounded-lg border border-slate-300 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800">Anterior</button>
+            <button type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={currentPage >= totalPages || visibleTasks.length === 0} className="rounded-lg border border-slate-300 px-3 py-1.5 font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800">Siguiente</button>
+          </div>
+        </div>
       </section>
-    </section>
 
     {detail && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDetail(null); }}><section role="dialog" aria-modal="true" aria-labelledby="assignment-detail-title" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"><div className="flex items-start justify-between gap-4"><h2 id="assignment-detail-title" className="text-xl font-bold text-slate-900">Detalle de asignación</h2><button type="button" onClick={() => setDetail(null)} aria-label="Cerrar detalles" className="rounded-lg px-2 py-1 text-slate-500 hover:bg-slate-100">Cerrar</button></div><dl className="mt-5 grid gap-4 sm:grid-cols-2">{[
       ['Actividad', detail.task.title], ['Cliente', detail.task.client_id ? clientNames[detail.task.client_id] ?? 'Cliente' : 'Sin cliente'],
