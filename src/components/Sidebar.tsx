@@ -1,15 +1,16 @@
 import { useState } from 'react';
-import { Activity, BriefcaseBusiness, ChartNoAxesCombined, ClipboardList, Clock3, History, Menu, Users, X } from './icons';
+import { Activity, BriefcaseBusiness, CalendarDays, ChartNoAxesCombined, ClipboardList, Clock3, History, Menu, Users, X } from './icons';
 import type { UserRole } from '../types/database';
 import ThemeToggle from './ThemeToggle';
 
-export type TabId = 'tasks' | 'supervision' | 'time' | 'clients' | 'history' | 'workload' | 'metrics' | 'users';
+export type TabId = 'tasks' | 'supervision' | 'time' | 'clients' | 'history' | 'workload' | 'metrics' | 'users' | 'fiscal';
 
 const links: { id: TabId; label: string; icon: typeof ClipboardList; managersOnly?: boolean; accountantOnly?: boolean; adminOnly?: boolean }[] = [
   { id: 'tasks', label: 'Mis Tareas', icon: ClipboardList, accountantOnly: true },
   { id: 'supervision', label: 'Supervisión de tareas', icon: ClipboardList, managersOnly: true },
   { id: 'time', label: 'Time Tracker', icon: Clock3 },
   { id: 'clients', label: 'Clientes', icon: BriefcaseBusiness },
+  { id: 'fiscal', label: 'Agenda Fiscal', icon: CalendarDays },
   { id: 'history', label: 'Historial', icon: History },
   { id: 'users', label: 'Gestión de usuarios', icon: Users, adminOnly: true },
   { id: 'workload', label: 'Asignación de Carga de Trabajo', icon: Users, managersOnly: true },
